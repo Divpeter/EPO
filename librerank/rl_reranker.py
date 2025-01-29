@@ -23,6 +23,7 @@ class RLModel(BaseModel):
         self.rep_num = rep_num
         self.loss_type = loss_type
 
+
         with self.graph.as_default():
             self._build_graph()
 
@@ -207,6 +208,7 @@ class RLModel(BaseModel):
 
         with tf.variable_scope("loss"):
             self._build_loss()
+
 
     def build_ndcg_reward(self, labels):
         # labels = labels.tolist()

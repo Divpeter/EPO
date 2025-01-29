@@ -1,0 +1,71 @@
+{
+  "CTR": {
+    "model_type": "developing_models.private_sphere.tuanyu.subscribe_rerank_actor_critic_v2_optimize_reward.V3",
+    "rnn_config": {
+      "rnn_cell_type": "custom_gru",
+      "state_size": 512,
+      "rnn_cell_layer": 1,
+      "attention_head_nums": 1,
+      "training_sample_manner": "greedy",
+      "sample_manner": "greedy",
+      "sample_polarization_degree": 1,
+      "teacher_forcing": false,
+      "label_type": "click_ctrscore",
+      "ctrscore_feature": "S_vv",
+      "decoder_input_from": "encoder_output",
+      "target_weights_manner": "equal",
+      "use_masking": true,
+      "use_bidirectional_encoder": false,
+      "feed_context_vector": false,
+      "rnn_input_reverse": false
+    },
+    "rl_config": {
+      "reward_method": "lzd_with_baseline",
+      "pv_value_evaluation": "lower_bound",
+      "reward_normalization": false,
+      "evaluator_type": "pv_wise",
+      "baseline_reward_discount_ratio": 0.6,
+      "use_dynamic_baseline_reward_discount_ratio": true
+    },
+    "modelx": {
+      "activation": "lrelu",
+      "dnn_hidden_units": [256, 128, 64, 32, 16, 8],
+      "dnn_l2_reg": 1e-6,
+      "augment_feature_normalization": "min_max",
+      "add_position_info": "",
+      "clip_loss": "tanh",
+      "loss_type": "optimize_reward_directly",
+      "encoder_type": "deep_set_relu",
+      "extra_loss": "attention_weight_entropy_loss_2",
+      "loss_weight_decay_method": "sigmoid_decay",
+      "attention_weight_entropy_loss_weight": 0.02,
+      "neural_sort_version": "original_neural_sort",
+      "temperature_factor": 0.3,
+      "sample_noise": true
+    },
+    "use_BN": true,
+    "optimizer": {
+      "AdamAsync": {
+        "initial_learning_rate": 0.00001,
+        "lrcs_init_lr": 0.001,
+        "lrcs_init_step": 300000,
+        "decay_step": 5000000,
+        "decay_rate": 0.95,
+        "clip_gradients": 5.0
+      }
+    },
+    "auc": {
+      "decay_rate": 0.999,
+      "gauc": [],
+      "auc_reset_step": 150000
+    },
+    "scene_specific": {
+      "data_type": "top_item"
+    },
+    "candidate_size": 20,
+    "main_columns": "embedding_columns;context_columns",
+    "augmenting_blocks": "item_columns;context_columns",
+    "restore_embedding": false,
+    "restore_dir": "dfs://na61dfssearch1--cn-zhangjiakou/pora/training_released/ckpt/tuanyu_subscribe_rerank_evaluator_v1_new/202408270915/data"
+  }
+}
