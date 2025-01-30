@@ -4,6 +4,7 @@ from tensorflow.contrib import layers
 from tensorflow.python.ops import rnn
 from librerank.prada_util_attention import *
 from librerank.utils import neural_sort
+import tensorflow.python.framework.ops as ops
 
 class NS_generator(RLModel):
 
@@ -338,7 +339,6 @@ class NS_generator(RLModel):
                 sampling_symbol))  # [B,N,input_size]->[B,input_size] or [B,N,state_size]->[B,state_size]
             sampling_symbol_embedding = tf.stop_gradient(sampling_symbol_embedding)
 
-
             #这里使用neural_sort完成对目标的排序，
             #和evaluator直接交互的是rl_sp ，rl_d，所以这里把排序后的格式和这个对齐应该就可以
             self.neural_sort_rl_sp_output = neural_sort(self.itm_spar_ph, attention_weights, self.temperature_factor)
@@ -403,7 +403,7 @@ class NS_generator(RLModel):
             self.multi_head_self_attention_layer = None
             self.rnn_layer = None
             self.pair_wise_comparison_layer = None
-            self.name = 'CMR_evaluator'
+            self.name = 'NS_evaluator'
             self.label_type = 'zero_one'
             self.feature_batch_norm = True
             self.N = self.item_size = self.pv_size = self.max_time_len
@@ -443,9 +443,26 @@ class NS_generator(RLModel):
     def build_actor_loss(self):
         self.loss = tf.reduce_mean(-self.logits)
 
-        self.opt()
+        self.actor_opt()
 
-    def train(self, batch_data, train_order, auc_rewards, lr, reg_lambda, keep_prop=0.8, train_prefer=0):
+    def actor_opt(self):
+        for v in tf.trainable_variables():
+            if 'bias' not in v.name and 'emb' not in v.name:
+                self.loss += self.reg_lambda * tf.nn.l2_loss(v)
+        trainable_var = [var for var in ops.get_collection(ops.GraphKeys.TRAINABLE_VARIABLES) if
+                         (self.name not in var.name and "emb_mtx" not in var.name)]
+        self.optimizer = tf.train.AdamOptimizer(self.lr)
+
+        if self.max_grad_norm > 0:
+            grads_and_vars = self.optimizer.compute_gradients(self.loss, var_list=trainable_var)
+            for idx, (grad, var) in enumerate(grads_and_vars):
+                if grad is not None:
+                    grads_and_vars[idx] = (tf.clip_by_norm(grad, self.max_grad_norm), var)
+            self.train_step = self.optimizer.apply_gradients(grads_and_vars)
+        else:
+            self.train_step = self.optimizer.minimize(self.loss, var_list=trainable_var)
+
+    def train(self, batch_data, lr, reg_lambda, keep_prop=0.8, train_prefer=0):
         with self.graph.as_default():
             _, total_loss, auc_loss, training_attention_distribution, training_prediction_order, predictions = \
                 self.sess.run(
@@ -455,14 +472,11 @@ class NS_generator(RLModel):
                         self.itm_spar_ph: batch_data[2],
                         self.itm_dens_ph: batch_data[3],
                         self.seq_length_ph: batch_data[6],
-                        self.auc_label: auc_rewards,
                         self.reg_lambda: reg_lambda,
                         self.lr: lr,
                         self.keep_prob: keep_prop,
                         self.is_train: True,
                         self.only_evaluator: False,
-                        self.feed_train_order: True,
-                        self.train_order: train_order,
                         self.controllable_auc_prefer: train_prefer,
                         self.controllable_prefer_vector: [[train_prefer, 1 - train_prefer]],
                     })
@@ -511,7 +525,7 @@ class NS_generator(RLModel):
 
         self.evaluator_opt()
 
-    def evaluatort_opt(self):
+    def evaluator_opt(self):
         for v in tf.trainable_variables():
             if 'bias' not in v.name and 'emb' not in v.name:
                 self.evaluator_loss += self.reg_lambda * tf.nn.l2_loss(v)
@@ -552,7 +566,6 @@ class NS_generator(RLModel):
             self.logits_layer()
             # 之后加载指定路径的evaluator参数
             self.load_evaluator_params(self.evaluator_path)
-
 
     def load_evaluator_params(self, path):
         """
@@ -672,7 +685,6 @@ class NS_generator(RLModel):
             predictions = seq_mask*logits
             self.logits = predictions
         return predictions
-
 
     def predict_evaluator(self, usr_ft, item_spar_fts, item_dens_fts, seq_len):
         with self.graph.as_default():
