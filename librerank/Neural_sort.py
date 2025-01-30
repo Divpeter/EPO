@@ -464,9 +464,9 @@ class NS_generator(RLModel):
 
     def train(self, batch_data, lr, reg_lambda, keep_prop=0.8, train_prefer=0):
         with self.graph.as_default():
-            _, total_loss, auc_loss, training_attention_distribution, training_prediction_order, predictions = \
+            _, total_loss, training_attention_distribution, training_prediction_order, predictions = \
                 self.sess.run(
-                    [self.train_step, self.loss, self.auc_loss, self.training_attention_distribution, self.training_prediction_order, self.predictions],
+                    [self.train_step, self.loss, self.training_attention_distribution, self.training_prediction_order, self.predictions],
                     feed_dict={
                         self.usr_profile: np.reshape(np.array(batch_data[1]), [-1, self.profile_num]),
                         self.itm_spar_ph: batch_data[2],
