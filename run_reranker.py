@@ -157,7 +157,7 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
         model = CMR_evaluator(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
                               itm_dens_fnum,
                               profile_num, max_norm=params.max_norm)
-    
+
     elif params.model_type == 'LAST_evaluator':
         model = LAST_evaluator(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
                                itm_dens_fnum,
@@ -197,7 +197,6 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
                               acc_prefer=params.acc_prefer,
                               is_controllable=params.controllable)
 
-              
         if params.evaluator_type == 'cmr':
             evaluator = CMR_evaluator(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
                                       itm_dens_fnum,
@@ -215,14 +214,14 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
             evaluator.set_sess(sess)
             sess.run(tf.global_variables_initializer())
             evaluator.load(params.evaluator_path)
-    elif params.model_type == 'NS_generator':
+    elif params.model_type == 'NS_generator' or params.model_type == 'NS_evaluator':
         model = NS_generator(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
-                              itm_dens_fnum,
-                              profile_num, max_norm=params.max_norm, rep_num=params.rep_num,
-                              acc_prefer=params.acc_prefer,
-                              is_controllable=params.controllable)
+                             itm_dens_fnum,
+                             profile_num, max_norm=params.max_norm, rep_num=params.rep_num,
+                             acc_prefer=params.acc_prefer,
+                             is_controllable=params.controllable)
 
-        #这里不再有evaluator了，需要将对应参数设定到generator整体的evaluator部分
+        # 这里不再有evaluator了，需要将对应参数设定到generator整体的evaluator部分
         if params.evaluator_type == 'cmr':
             evaluator = CMR_evaluator(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
                                       itm_dens_fnum,
@@ -269,18 +268,6 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
             model.load(params.reload_path)
             print("reload ", params.reload_path)
 
-    # training_monitor = {
-    #     'train_loss': [],
-    #     'vali_loss': [],
-    #     'map_l': [],
-    #     'ndcg_l': [],
-    #     'clicks_l': [],
-    #     'utility_l': [],
-    #     'map_h':[],
-    #     'ndcg_h': [],
-    #     'clicks_h': [],
-    #     'utility_h': [],
-    # }
     training_monitor = {
         'train_loss': [],
         'auc_train_loss': [],
@@ -342,15 +329,6 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
 
     if True:
         if not params.controllable:
-            # pass
-            # if params.model_type == 'CMR_evaluator':
-            #     vali_loss, res = eval_pv_evaluator(model, test_file, params.l2_reg, params.batch_size, False,
-            #                                        params.metric_scope)
-            # else:
-            # if params.model_type == 'LAST_generator':
-            #     vali_loss, res = eval_last(model, test_file, params.l2_reg, params.batch_size, False,
-            #                    params.metric_scope, with_evaluator=params.with_evaluator_metrics, evaluator=evaluator)
-            # else:
             vali_loss, res = eval(model, test_file, params.l2_reg, params.batch_size, False,
                                   params.metric_scope, with_evaluator=params.with_evaluator_metrics, evaluator=
                                   evaluator if params.with_evaluator_metrics else None)
@@ -446,27 +424,8 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
 
                 act_idx_out, act_probs_one, rl_sp_outputs, rl_de_outputs, mask_arr, lp_sp_data, lp_de_data, _, enc_input, \
                 cate_chosen, cate_seq = model.predict(data_batch, train_prefer, params.l2_reg)
-
-
-                #print(act_idx_out)
-                #print(data_batch[4])
-                #labels = np.array(model.build_label_reward(data_batch[4], act_idx_out))
-                #auc_rewards = np.array(model.build_ndcg_reward(labels))
-                #base_auc_rewards = np.array(model.build_ndcg_reward(data_batch[4]))
-                #auc_rewards -= base_auc_rewards
-                #print(auc_rewards)
                 auc_rewards = evaluator.predict(rl_sp_outputs, rl_de_outputs, data_batch[6])
-                # base_auc_rewards = evaluator.predict(np.array(data_batch[2]), np.array(data_batch[3]), data_batch[6])
-                # auc_rewards = auc_rewards-base_auc_rewards
-                # d_preds, d_rewards = discriminator.predict(rl_sp_outputs, rl_de_outputs, data_batch[6])
-                # rewards = pred + d_rewards.reshape((-1, max_time_len)) * c_rewards_d
-
                 _, div_rewards = model.build_erria_reward(cate_chosen, cate_seq)
-                # _, base_div_rewards = model.build_erria_reward(cate_seq, cate_seq)  # rank base rerank new
-                # div_rewards = div_rewards-base_div_rewards
-                # rewards = pred
-                # train rl-rerank
-                # for _ in range(update_steps):
                 loss, mean_return, auc_loss, div_loss = model.train(data_batch, rl_sp_outputs, rl_de_outputs,
                                                                     act_probs_one, act_idx_out,
                                                                     auc_rewards, div_rewards, mask_arr,
@@ -475,22 +434,13 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
                                                                     params.keep_prob, train_prefer=train_prefer)
                 auc_train_losses_step.append(auc_loss)
                 div_train_losses_step.append(div_loss)
-
-                # train discriminator
-                # if step % (update_rate_d * int(update_steps)) == 0:
-                #     d_label = np.array([1] * lp_sp_data.shape[0] + [0] * rl_sp_outputs.shape[0])
-                #     spar_data = np.concatenate([lp_sp_data, rl_sp_outputs], axis=0)
-                #     dens_data = np.concatenate([lp_de_data, rl_de_outputs], axis=0)
-                #     seq_len = np.array(data_batch[6] + data_batch[6])
-                #     d_total_loss = discriminator.train([spar_data, dens_data, d_label, seq_len], lr, l2_reg)
-                #     print('dis, step: %d' % (step), 'loss', d_total_loss)
             elif params.model_type == 'LAST_generator':
                 training_attention_distribution, training_prediction_order, predictions, cate_seq, cate_chosen = \
                     model.rerank(data_batch, params.keep_prob, train_prefer=train_prefer)
 
                 rl_sp_outputs, rl_de_outputs = model.build_ft_chosen(data_batch, training_prediction_order)
-                #rerank_click = np.array(model.build_label_reward(data_batch[4], training_prediction_order))
-                #print(training_prediction_order)
+                # rerank_click = np.array(model.build_label_reward(data_batch[4], training_prediction_order))
+                # print(training_prediction_order)
                 if params.auc_rewards_type == 'iv':
                     auc_rewards = evaluator.predict(np.array(data_batch[1]), rl_sp_outputs, rl_de_outputs,
                                                     data_batch[6])
@@ -512,18 +462,21 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
                 div_rewards = model.build_alpha_ndcg_reward(cate_chosen, cate_seq)
                 div_rewards -= base_div_rewards
 
-                loss = model.train(data_batch, training_prediction_order, auc_rewards, div_rewards, params.lr, params.l2_reg,
+                loss = model.train(data_batch, training_prediction_order, auc_rewards, div_rewards, params.lr,
+                                   params.l2_reg,
                                    params.keep_prob)
             elif params.model_type == 'CMR_generator':
-                #这里生成的cate_chosen也是传递序列的关键数据
+                # 这里生成的cate_chosen也是传递序列的关键数据
                 training_attention_distribution, training_prediction_order, predictions, cate_seq, cate_chosen = \
                     model.rerank(data_batch, params.keep_prob, train_prefer=train_prefer)
 
                 if params.auc_rewards_type == 'iv':
-                    rl_sp_outputs, rl_de_outputs = model.build_ft_chosen(data_batch, training_prediction_order)#[16,10,5],data_size:16 
+                    rl_sp_outputs, rl_de_outputs = model.build_ft_chosen(data_batch,
+                                                                         training_prediction_order)  # [16,10,5],data_size:16
                     rerank_click = np.array(model.build_label_reward(data_batch[4], training_prediction_order))
                     if params.evaluator_type == 'cmr' or params.evaluator_type == 'last':
-                        auc_rewards = evaluator.predict(np.array(data_batch[1]), rl_sp_outputs, rl_de_outputs,#[16,10]
+                        auc_rewards = evaluator.predict(np.array(data_batch[1]), rl_sp_outputs, rl_de_outputs,
+                                                        # [16,10]
                                                         data_batch[6])
                         base_auc_rewards = evaluator.predict(np.array(data_batch[1]), np.array(data_batch[2]),
                                                              np.array(data_batch[3]), data_batch[6])
@@ -584,32 +537,11 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
                                                        train_prefer=train_prefer)
                 auc_train_losses_step.append(auc_loss)
                 div_train_losses_step.append(div_loss)
-            elif params.model_type == 'NSgenerator':
-                training_attention_distribution, training_prediction_order, predictions, cate_seq, cate_chosen = \
-                    model.rerank(data_batch, params.keep_prob, train_prefer=train_prefer)
-
-                if params.auc_rewards_type == 'iv':
-                    rl_sp_outputs, rl_de_outputs = model.build_evaluator_input()#[16,10,5],data_size:16 
-                    
-                    if params.evaluator_type == 'cmr' or params.evaluator_type == 'last':
-                        auc_rewards = model.predict(np.array(data_batch[1]), rl_sp_outputs, rl_de_outputs,#[16,10]
-                                                        data_batch[6])
-                        base_auc_rewards = model.predict(np.array(data_batch[1]), np.array(data_batch[2]),
-                                                             np.array(data_batch[3]), data_batch[6])
-                    elif params.evaluator_type == 'egr':
-                        auc_rewards = model.predict(rl_sp_outputs, rl_de_outputs, data_batch[6])
-                        base_auc_rewards = model.predict(np.array(data_batch[2]), np.array(data_batch[3]),
-                                                             data_batch[6])
-
-                    # base_auc_rewards = np.mean(base_auc_rewards, axis=1)
-                    # base_auc_rewards = np.array(create_ave_reward(base_auc_rewards, data_batch[6]))
-                    auc_rewards -= base_auc_rewards
-
-                loss, auc_loss= model.train(data_batch, training_prediction_order, auc_rewards, div_rewards,
-                                                       params.lr, params.l2_reg, params.keep_prob,
-                                                       train_prefer=train_prefer)
-                auc_train_losses_step.append(auc_loss)
-
+            elif params.model_type == 'NS_evaluator':
+                loss = model.train(data_batch, params.lr, params.l2_reg, params.keep_prob, train_prefer=train_prefer)
+                auc_train_losses_step.append(loss)
+            elif params.model_type == 'NS_generator':
+                loss = model.train_evaluator(data_batch, params.lr, params.l2_reg, params.keep_prob, train_prefer)
 
             elif params.model_type == 'Seq2Slate':  # [B, N, N]    [[0,0,1],[0,1,0],[1,0,0]]
                 act_idx_out, act_probs_one, rl_sp_outputs, rl_de_outputs, mask_arr, lp_sp_data, lp_de_data, _, enc_input, \
@@ -684,7 +616,7 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
                     #             s, res[0][i], res[1][i], res[2][i], res[-2][i], res[-1][i]))
 
                     if training_monitor['map_l'][-1] >= max(training_monitor['map_l'][1:]):
-                    # if training_monitor['alpha_ndcg'][-1] >= max(training_monitor['alpha_ndcg'][1:]):
+                        # if training_monitor['alpha_ndcg'][-1] >= max(training_monitor['alpha_ndcg'][1:]):
                         # save model
                         model.save(save_path)
                         pkl.dump(res[-1], open(log_save_path, 'wb'))
@@ -734,8 +666,10 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
                         print("auc_prefer: ", float(j * 5) / 10)
                         print("STEP %d  INTIAL RANKER | LOSS VALI: NULL" % step)
                         for i, s in enumerate(params.metric_scope):
-                            print("@%d  MAP: %.4f  NDCG: %.4f  CLICKS: %.4f  ILAD: %.4f  ERR_IA: %.4f  ALPHA_NDCG: %.4f" % (
-                                s, res[0][j][i], res[1][j][i], res[2][j][i], res[3][j][i], res[4][j][i], res[5][j][i]))
+                            print(
+                                "@%d  MAP: %.4f  NDCG: %.4f  CLICKS: %.4f  ILAD: %.4f  ERR_IA: %.4f  ALPHA_NDCG: %.4f" % (
+                                    s, res[0][j][i], res[1][j][i], res[2][j][i], res[3][j][i], res[4][j][i],
+                                    res[5][j][i]))
 
                     if training_monitor['map_l'][-1] >= max(training_monitor['map_l'][1:]):
                         # save model
@@ -769,7 +703,7 @@ def reranker_parse_args():
     parser.add_argument('--model_type', default='CMR_generator',
                         choices=['PRM', 'DLCM', 'SetRank', 'GSF', 'miDNN', 'Seq2Slate', 'EGR_evaluator',
                                  'EGR_generator', 'CMR_generator', 'CMR_evaluator', 'LAST_generator',
-                                 'LAST_evaluator', 'NS_generator'],
+                                 'LAST_evaluator', 'NS_generator', 'NS_evaluator'],
                         type=str,
                         help='algorithm name, including PRM, DLCM, SetRank, GSF, miDNN, Seq2Slate, EGR_evaluator, EGR_generator')
     parser.add_argument('--data_set_name', default='ad', type=str, help='name of dataset, including ad and prm')
