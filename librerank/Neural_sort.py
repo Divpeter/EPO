@@ -165,6 +165,15 @@ class NS_generator(RLModel):
                                                                self.lstm_hidden_units], [tf.nn.relu],
                                             "hyper_enc_dnn_2")  # [B*N or B, 1, 200]
 
+    def build_evaluator_input(self, itm_spar_ph, itm_dens_ph):
+        self.itm_spar_emb = tf.gather(self.emb_mtx, itm_spar_ph)  # [? ,10(max_time_len), 5(itm_spar_num), 16(eb_dim)]
+        self.item_seq = tf.concat(
+            [tf.reshape(self.itm_spar_emb, [-1, self.max_time_len, self.itm_spar_num * self.emb_dim]), itm_dens_ph],
+            axis=-1)  # [?, 10, ft_num]
+        self.itm_enc_input = tf.reshape(self.item_seq, [-1, self.item_size, self.ft_num])  # [B, N, ft_num]
+        self.usr_enc_input = tf.reshape(self.usr_seq, [-1, 1, self.profile_num * self.emb_dim])
+        self.enc_input_evaluator = tf.concat([self.itm_enc_input, tf.tile(self.usr_enc_input, [1, self.item_size, 1])],
+                                             axis=-1)
 
     def rnn_decode(self):
         # build decoder input
@@ -335,8 +344,6 @@ class NS_generator(RLModel):
             self.neural_sort_rl_sp_output = neural_sort(self.itm_spar_ph, attention_weights, self.temperature_factor)
             self.neural_sort_rl_de_output = neural_sort(self.itm_dens_ph, attention_weights, self.temperature_factor)
             
-
-
             return sampling_symbol_embedding, sampling_symbol_score
 
         return sampling_function
@@ -346,7 +353,8 @@ class NS_generator(RLModel):
 
         with tf.variable_scope("input"):
             self.train_phase = self.is_train
-            self.sample_phase = tf.placeholder(tf.bool, name="sample_phase")  # True
+            self.sample_phase = tf.placeholder(tf.bool, name="sample phase")  # True
+            self.only_evaluator = tf.placeholder(tf.bool, name="only evaluator")  # True
             self.mask_in_raw = tf.placeholder(tf.float32, [None])
             self.div_label = tf.placeholder(tf.float32, [None, self.max_time_len])
             self.auc_label = tf.placeholder(tf.float32, [None, self.max_time_len])
@@ -400,12 +408,7 @@ class NS_generator(RLModel):
             self.feature_batch_norm = True
             self.N = self.item_size = self.pv_size = self.max_time_len
             self.use_BN = True
-            
             self.evaluator_path = '/root/LAST/model/save_model_ad/10/202303091111_lambdaMART_LAST_evaluator_16_0.0005_0.0002_64_16_0.8_1.0'
-
-            self.enc_input_evaluator = tf.concat([self.itm_enc_input, tf.tile(self.usr_enc_input, [1, self.item_size, 1])],
-                                        axis=-1)
-            # self.all_feature_concatenation_evaluator = self.enc_input_evaluator
             self.is_training = tf.placeholder(tf.bool)
             self.batch_size = tf.shape(self.itm_enc_input)[0]
             self.score_format = 'iv'
@@ -416,120 +419,31 @@ class NS_generator(RLModel):
             self.deep_set_encode()
 
         with tf.variable_scope("encoder_state"):
-            # self.decoder_cell = tf.nn.rnn_cell.BasicLSTMCell(self.lstm_hidden_units)
             self.decoder_cell = tf.nn.rnn_cell.GRUCell(self.lstm_hidden_units)
 
         with tf.variable_scope("decoder"):
             self.rnn_decode()
 
-        #应该是这一步之后将使用Neural_Sort排序后的结果传递
+        # judge of the evaluator's input is actor's (when training actor) or the raw data (when training evaluator)
+        if self.only_evaluator == True:
+            self.enc_input_evaluator = self.build_evaluator_input(self.itm_spar_ph, self.itm_dens_ph)
+        else:
+            self.enc_input_evaluator = self.build_evaluator_input(self.neural_sort_rl_sp_outputs, self.neural_sort_rl_de_outputs)
 
+        #应该是这一步之后将使用Neural_Sort排序后的结果传递
         with tf.variable_scope("evaluator"):
             self.build_evaluator()
 
         with tf.variable_scope("loss"):
-            self._build_loss()
+            self.build_actor_loss()
 
         with tf.variable_scope("evaluator_loss"):
             self.build_evaluator_loss()
-    
-    def build_reward(self):
 
-        self.reward = []
-
-        return self.reward
-
-
-    def _build_loss(self):
-        self.gamma = 1
-        if self.loss_type == 'ce':
-            gamma = 0.3
-
-            reinforce_weight = tf.range(self.pv_size, dtype=tf.float32)
-            reinforce_weight = tf.reshape(reinforce_weight, [-1, 1])  # [N,1]
-            reinforce_weight = tf.tile(reinforce_weight, [1, self.pv_size])  # [N,N]
-            reinforce_weight = reinforce_weight - tf.transpose(reinforce_weight)  # [N,N]
-            reinforce_weight = tf.where(reinforce_weight >= 0, tf.pow(gamma, reinforce_weight),
-                                        tf.zeros_like(reinforce_weight))  # [N,N]
-            # self.print_loss = tf.print("rw: ", reinforce_weight, output_stream=sys.stderr)
-
-            logits = tf.stack(self.training_attention_distribution[:-1], axis=1)  # [B,10,20]
-            labels = tf.one_hot(self.training_prediction_order, self.item_size)  # [B,10,20]
-
-            # self.div_label = tf.matmul(self.div_label, reinforce_weight)  # [B,N]
-            # div_label = tf.reshape(self.div_label, [-1, 1])
-            # div_ce = tf.multiply(div_label, tf.reshape(tf.nn.softmax_cross_entropy_with_logits(logits=logits,
-            #                                                                                    labels=labels), [-1, 1]))
-            # div_ce = tf.reshape(div_ce, (-1, self.max_time_len))  # [B, N]
-
-            self.auc_label = tf.matmul(self.auc_label, reinforce_weight)  # [B,N]
-            auc_label = tf.reshape(self.auc_label, [-1, 1])
-            auc_ce = tf.multiply(auc_label, tf.reshape(tf.nn.softmax_cross_entropy_with_logits(logits=logits,
-                                                                                               labels=labels), [-1, 1]))
-            auc_ce = tf.reshape(auc_ce, (-1, self.max_time_len))  # [B, N]
-
-            # self.print_loss = tf.print("label:", auc_label, tf.shape(auc_label),
-            #                            "\nprob_mask:", prob_mask, tf.shape(prob_mask),
-            #                            "\naction", act_idx_one_hot, tf.shape(act_idx_one_hot),
-            #                            output_stream=sys.stderr)
-            # self.aa, self.bb, self.cc = auc_label, prob_mask, act_idx_one_hot
-            # if self.is_controllable:
-            #     ce = tf.add(tf.multiply(div_ce, 1 - self.controllable_auc_prefer),
-            #                 tf.multiply(auc_ce, self.controllable_auc_prefer))
-            # else:
-            #     ce = tf.add(tf.multiply(div_ce, 1 - self.acc_prefer),
-            #                 tf.multiply(auc_ce, self.acc_prefer))
-
-            # self.div_loss = tf.reduce_mean(tf.reduce_sum(div_ce, axis=1))
-            # self.auc_loss = tf.reduce_mean(tf.reduce_sum(auc_ce, axis=1))
-            self.loss = tf.reduce_mean(tf.reduce_sum(auc_ce, axis=1))
-        else:
-            raise ValueError('No loss.')
+    def build_actor_loss(self):
+        self.loss = tf.reduce_mean(-self.logits)
 
         self.opt()
-
-    # def loss_op(self):
-    #     # self.evaluate()  # reward:[B,N]
-    #     self.loss = 0.0
-    #     # self.training_attention_distribution: [B,N] * (N+1)
-    #     # labels: [B,N] * (N)
-    #     logits = tf.stack(self.training_attention_distribution[:-1], axis=1)  # [B,10,20]
-    #     labels = tf.one_hot(self.training_prediction_order, self.candidate_size)  # [B,10,20]
-    #     if self.loss_type == "ce":
-    #         loss = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=labels)  # [B,10]
-    #         # if self.clip_loss == "tanh":
-    #         #     loss = tf.tanh(loss)
-    #     elif self.loss_type == "inner_product":
-    #         loss = -tf.reduce_sum(tf.multiply(tf.nn.softmax(logits), labels), axis=-1)  # [B,10]
-    #     self.loss += tf.reduce_sum(loss * self.auc_label, axis=-1)  # [B]
-    #     self.loss = tf.reduce_mean(self.loss)
-    #
-    #     self.loss = self.loss
-
-
-    # def train(self, batch_data, train_order, auc_rewards, div_rewards, lr, reg_lambda, keep_prop=0.8, train_prefer=0):
-    #     with self.graph.as_default():
-    #         _, total_loss, auc_loss, div_loss, training_attention_distribution, training_prediction_order, predictions = \
-    #             self.sess.run(
-    #                 [self.train_step, self.loss, self.auc_loss, self.div_loss,
-    #                  self.training_attention_distribution, self.training_prediction_order, self.predictions],
-    #                 feed_dict={
-    #                     self.usr_profile: np.reshape(np.array(batch_data[1]), [-1, self.profile_num]),
-    #                     self.itm_spar_ph: batch_data[2],
-    #                     self.itm_dens_ph: batch_data[3],
-    #                     self.seq_length_ph: batch_data[6],
-    #                     self.auc_label: auc_rewards,
-    #                     self.div_label: div_rewards,
-    #                     self.reg_lambda: reg_lambda,
-    #                     self.lr: lr,
-    #                     self.keep_prob: keep_prop,
-    #                     self.is_train: True,
-    #                     self.feed_train_order: True,
-    #                     self.train_order: train_order,
-    #                     self.controllable_auc_prefer: train_prefer,
-    #                     self.controllable_prefer_vector: [[train_prefer, 1 - train_prefer]],
-    #                 })
-    #         return total_loss, auc_loss, div_loss
 
     def train(self, batch_data, train_order, auc_rewards, lr, reg_lambda, keep_prop=0.8, train_prefer=0):
         with self.graph.as_default():
@@ -546,36 +460,13 @@ class NS_generator(RLModel):
                         self.lr: lr,
                         self.keep_prob: keep_prop,
                         self.is_train: True,
+                        self.only_evaluator: False,
                         self.feed_train_order: True,
                         self.train_order: train_order,
                         self.controllable_auc_prefer: train_prefer,
                         self.controllable_prefer_vector: [[train_prefer, 1 - train_prefer]],
                     })
             return total_loss, auc_loss
-
-    def rerank(self, batch_data, keep_prop=0.8, train_prefer=0):
-        # def rerank(self, batch_data, train_prefer, sample_phase=False, train_phase=False):
-        with self.graph.as_default():
-            training_attention_distribution, training_prediction_order, predictions, cate_seq, cate_chosen = \
-                self.sess.run(
-                    [self.training_attention_distribution, self.training_prediction_order, self.predictions,
-                     self.cate_seq, self.cate_chosen],
-                    feed_dict={
-                        self.usr_profile: np.reshape(np.array(batch_data[1]), [-1, self.profile_num]),
-                        self.itm_spar_ph: batch_data[2],
-                        self.itm_dens_ph: batch_data[3],
-                        self.seq_length_ph: batch_data[6],
-                        self.is_train: True,
-                        self.feed_train_order: False,
-                        self.train_order: np.zeros_like(batch_data[4]),
-                        self.keep_prob: keep_prop,
-                        # self.sample_phase: sample_phase,
-                        self.label_ph: batch_data[4],
-                        self.controllable_auc_prefer: train_prefer,
-                        self.controllable_prefer_vector: [[train_prefer, 1 - train_prefer]],
-                    },
-                )
-        return training_attention_distribution, training_prediction_order, predictions, cate_seq, cate_chosen
 
     def eval(self, batch_data, reg_lambda, eval_prefer=0, keep_prob=1, no_print=True):
         with self.graph.as_default():
@@ -587,6 +478,7 @@ class NS_generator(RLModel):
                                                self.itm_dens_ph: batch_data[3],
                                                self.seq_length_ph: batch_data[6],
                                                self.is_train: False,
+                                               self.only_evaluator: False,
                                                self.sample_phase: False,
                                                self.controllable_auc_prefer: eval_prefer,
                                                self.controllable_prefer_vector: [[eval_prefer, 1 - eval_prefer]],
@@ -623,11 +515,6 @@ class NS_generator(RLModel):
         for v in tf.trainable_variables():
             if 'bias' not in v.name and 'emb' not in v.name:
                 self.evaluator_loss += self.reg_lambda * tf.nn.l2_loss(v)
-                # self.loss += self.reg_lambda * tf.norm(v, ord=1)
-
-        # self.lr = tf.train.exponential_decay(
-        #     self.lr_start, self.global_step, self.lr_decay_step,
-        #     self.lr_decay_rate, staircase=True, name="learning_rate")
 
         self.optimizer = tf.train.AdamOptimizer(self.lr)
 
@@ -652,11 +539,6 @@ class NS_generator(RLModel):
                                           "evaluator_dnn"),
 
     def build_evaluator(self):
-        # if self.restore_embedding and not self.is_local:
-        #     self.feature_columns = self.setup_feature_columns()
-        # self.embedding_layer()
-        # self.reshape_input()
-        # self.feature_augmentation()
         with tf.variable_scope("evaluator"):
             self.all_feature_concatenation_evaluator = self.enc_input_evaluator
 
@@ -791,22 +673,20 @@ class NS_generator(RLModel):
             self.logits = predictions
         return predictions
 
-    def build_evaluator_input(self):
 
-        return self.neural_sort_rl_sp_output , self.neural_sort_rl_de_output
-
-    def predict(self, usr_ft,  seq_len):
+    def predict_evaluator(self, usr_ft, item_spar_fts, item_dens_fts, seq_len):
         with self.graph.as_default():
             ctr_probs = self.sess.run(self.logits, feed_dict={
                 self.usr_profile: np.reshape(usr_ft, [-1, self.profile_num]),
-                self.itm_spar_ph: self.neural_sort_rl_sp_output.reshape([-1, self.max_time_len, self.itm_spar_num]),
-                self.itm_dens_ph: self.neural_sort_rl_de_output.reshape([-1, self.max_time_len, self.itm_dens_num]),
+                self.itm_spar_ph: item_spar_fts.reshape([-1, self.max_time_len, self.itm_spar_num]),
+                self.itm_dens_ph: item_dens_fts.reshape([-1, self.max_time_len, self.itm_dens_num]),
                 self.seq_length_ph: seq_len,
+                self.only_evaluator: True,
                 self.is_train: False,
                 self.keep_prob: 1.0})
             return ctr_probs
 
-    def evaluator_train(self, batch_data, lr, reg_lambda, keep_prob=0.8, train_prefer=1):
+    def train_evaluator(self, batch_data, lr, reg_lambda, keep_prob=0.8, train_prefer=1):
         with self.graph.as_default():
             loss, _ = self.sess.run([self.loss, self.train_step], feed_dict={
                 self.usr_profile: np.reshape(np.array(batch_data[1]), [-1, self.profile_num]),
@@ -818,12 +698,13 @@ class NS_generator(RLModel):
                 self.reg_lambda: reg_lambda,
                 self.keep_prob: keep_prob,
                 self.is_train: True,
+                self.only_evaluator: True,
                 self.controllable_auc_prefer: train_prefer,
                 self.controllable_prefer_vector: [[train_prefer, 1 - train_prefer]],
             })
             return loss
 
-    def eval(self, batch_data, reg_lambda, eval_prefer=0, keep_prob=1, no_print=True):
+    def eval_evaluator(self, batch_data, reg_lambda, eval_prefer=0, keep_prob=1, no_print=True):
         with self.graph.as_default():
             pred, loss = self.sess.run([self.logits, self.loss], feed_dict={
                 self.usr_profile: np.reshape(np.array(batch_data[1]), [-1, self.profile_num]),
@@ -834,6 +715,7 @@ class NS_generator(RLModel):
                 self.reg_lambda: reg_lambda,
                 self.keep_prob: keep_prob,
                 self.is_train: False,
+                self.only_evaluator: True,
                 self.controllable_auc_prefer: eval_prefer,
                 self.controllable_prefer_vector: [[eval_prefer, 1 - eval_prefer]],
             })
