@@ -426,9 +426,9 @@ class NS_generator(RLModel):
 
         # judge of the evaluator's input is actor's (when training actor) or the raw data (when training evaluator)
         if self.only_evaluator == True:
-            self.enc_input_evaluator = self.build_evaluator_input(self.itm_spar_ph, self.itm_dens_ph)
+            self.build_evaluator_input(self.itm_spar_ph, self.itm_dens_ph)
         else:
-            self.enc_input_evaluator = self.build_evaluator_input(self.neural_sort_rl_sp_outputs, self.neural_sort_rl_de_outputs)
+            self.build_evaluator_input(self.neural_sort_rl_sp_outputs, self.neural_sort_rl_de_outputs)
 
         #应该是这一步之后将使用Neural_Sort排序后的结果传递
         with tf.variable_scope("evaluator"):
