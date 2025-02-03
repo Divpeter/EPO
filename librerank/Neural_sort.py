@@ -8,7 +8,15 @@ from librerank.utils import gumbel_sampling
 # import tensorflow.python.framework.ops as ops
 from tensorflow.python.framework import ops
 
+
 class NS_generator(RLModel):
+    def __init__(self, feature_size, eb_dim, hidden_size, max_time_len, itm_spar_num, itm_dens_num,
+                 profile_num, max_norm=None, acc_prefer=1.0, is_controllable=False, sample_val=0.2, gamma=0.01,
+                 rep_num=1, loss_type='ce', model_name='NS_evaluator'):
+        self.model_name = model_name
+        super(NS_generator, self).__init__(feature_size, eb_dim, hidden_size, max_time_len, itm_spar_num, itm_dens_num,
+                                           profile_num, max_norm, acc_prefer=acc_prefer,
+                                           is_controllable=is_controllable)
 
     def build_ft_chosen(self, data_batch, chosen):
         itm_spar_ph, itm_dens_ph, length_seq = data_batch[2], data_batch[3], data_batch[6]
@@ -77,7 +85,7 @@ class NS_generator(RLModel):
                                                       True)  # [B,state_size], W2di in paper, linear transform, same shape as decoder state and encoder states
                         else:
                             y = self.get_hyper_dnn(query, [query.get_shape()[-1].value, 200, attention_vec_size],
-                                               [tf.nn.relu, None], "hyper_dec_dnn")
+                                                   [tf.nn.relu, None], "hyper_dec_dnn")
                         y = tf.reshape(y, [-1, 1, 1, attention_vec_size])  # [B,1,1,state_size]
                         # Attention mask is a softmax of v^T * tanh(...).
                         s = tf.reduce_sum(
@@ -139,45 +147,25 @@ class NS_generator(RLModel):
                 # The output of the pointer network is actually the attention weight!
                 outputs.append(output)
 
-                
-
         return outputs, states, prediction_score
 
     def deep_set_encode(self):
-        # enc_input_train = tf.reshape(tf.tile(self.itm_enc_input, (1, self.max_time_len, 1)),
-        #                              [-1, self.item_size, self.ft_num])  # [B*N, N, ft_num]
-        # enc_input = tf.cond(self.train_phase, lambda: enc_input_train, lambda: self.itm_enc_input)  #
-        # self.enc_outputs = self.get_dnn(enc_input, [200, 80], [tf.nn.relu, tf.nn.relu], "enc_dnn")  # [B*N or B,
-
-        # self.enc_input = tf.concat([self.itm_enc_input, tf.tile(self.usr_enc_input, [1, self.item_size, 1])], axis=-1)  # [B, N, ft]
-        # enc_input_train = tf.reshape(tf.tile(self.enc_input, (1, self.max_time_len, 1)),
-        #                              [-1, self.item_size, self.ft_num])  # [B*N, N, ft_num]
-        # enc_input = tf.cond(self.train_phase, lambda: enc_input_train, lambda: self.enc_input)  #
         self.enc_input = self.all_feature_concatenation
-        if not self.is_controllable:
-            self.encoder_states = self.get_dnn(self.enc_input, [200], [tf.nn.relu], "enc_dnn_1")  # [B*N or B, N, 200]
-        else:
-            self.encoder_states = self.get_hyper_dnn(self.enc_input, [self.enc_input.get_shape()[-1].value, 200]
-                                                     , [tf.nn.relu], "hyper_enc_dnn_1")  # [B*N or B, N, 200]
+        self.encoder_states = self.get_dnn(self.enc_input, [200], [tf.nn.relu], "enc_dnn_1")  # [B*N or B, N, 200]
         self.final_state = tf.reduce_sum(self.encoder_states, axis=1)  # [B*N or B, 1, 200]
-        if not self.is_controllable:
-            self.final_state = self.get_dnn(self.final_state, [self.lstm_hidden_units], [tf.nn.relu],
-                                            "enc_dnn_2")  # [B*N or B, 1, 200]
-        else:
-            self.final_state = self.get_hyper_dnn(self.final_state, [self.final_state.get_shape()[-1].value,
-                                                               self.lstm_hidden_units], [tf.nn.relu],
-                                            "hyper_enc_dnn_2")  # [B*N or B, 1, 200]
+        self.final_state = self.get_dnn(self.final_state, [self.lstm_hidden_units], [tf.nn.relu],
+                                        "enc_dnn_2")  # [B*N or B, 1, 200]
 
     def build_evaluator_input(self, itm_spar_ph, itm_dens_ph):
-        
         self.itm_spar_emb = tf.gather(self.emb_mtx, tf.cast(itm_spar_ph, tf.int32))  # [?, 10, 5, 16]
         self.item_seq = tf.concat(
             [tf.reshape(self.itm_spar_emb, [-1, self.max_time_len, self.itm_spar_num * self.emb_dim]), itm_dens_ph],
             axis=-1)  # [?, 10, ft_num]
         self.itm_enc_input = tf.reshape(self.item_seq, [-1, self.item_size, self.ft_num])  # [B, N, ft_num]
         self.usr_enc_input = tf.reshape(self.usr_seq, [-1, 1, self.profile_num * self.emb_dim])
-        self.enc_input_evaluator = tf.concat([self.itm_enc_input, tf.tile(self.usr_enc_input, [1, self.item_size, 1])],
-                                             axis=-1)
+        raw_evaluator_input = tf.concat([self.itm_enc_input, tf.tile(self.usr_enc_input, [1, self.item_size, 1])],
+                                        axis=-1)
+        return raw_evaluator_input
 
     def rnn_decode(self):
         # build decoder input
@@ -291,12 +279,11 @@ class NS_generator(RLModel):
         # self.print_loss = tf.print("training_sampled_symbol: ", self.training_sampled_symbol, output_stream=sys.stderr)
         # self.dd, self.ee = [], []
 
-        # self.neural_sort_rl_sp_outputs = []
-        # self.neural_sort_rl_de_outputs = []
+        self.neural_sort_outputs = []
 
-        #回头写进超参数里面
+        # 回头写进超参数里面
         self.temperature_factor = 1.0
-        self.beta  = 1.0
+        self.beta = 1.0
 
         def sampling_function(attention_weights, _):
             attention_weights = attention_weights
@@ -304,7 +291,7 @@ class NS_generator(RLModel):
                 attention_weights = tf.where(self.training_sampled_symbol > 0, self.neg_inf, attention_weights)  # [B,N]
             attention_weights = tf.nn.softmax(attention_weights)
 
-            # attention_weights = tf.log(attention_weights + 1e-10) + gumbel_sampling(tf.shape(attention_weights), self.beta)    # [B,M]
+            attention_weights = tf.log(attention_weights + 1e-10) + gumbel_sampling(tf.shape(attention_weights), self.beta)    # [B,M]
 
             if self.training_sample_manner == "greedy":
                 # 1、greedy
@@ -345,12 +332,8 @@ class NS_generator(RLModel):
                 sampling_symbol))  # [B,N,input_size]->[B,input_size] or [B,N,state_size]->[B,state_size]
             sampling_symbol_embedding = tf.stop_gradient(sampling_symbol_embedding)
 
-            #这里使用neural_sort完成对目标的排序，
-            #和evaluator直接交互的是rl_sp ，rl_d，所以这里把排序后的格式和这个对齐应该就可以
-            self.neural_sort_rl_sp_outputs = neural_sort(self.itm_spar_ph, attention_weights, self.temperature_factor)
-            self.neural_sort_rl_de_outputs = neural_sort(self.itm_dens_ph, attention_weights, self.temperature_factor)
-            self.neural_sort_rl_sp_outputs = tf.reshape(self.neural_sort_rl_sp_outputs, [-1, self.max_time_len, self.itm_spar_num])
-            self.neural_sort_rl_de_outputs = tf.reshape(self.neural_sort_rl_de_outputs, [-1, self.max_time_len, self.itm_dens_num])
+            neural_sort_outputs = neural_sort(self.raw_evaluator_input, attention_weights, self.temperature_factor)
+            self.neural_sort_outputs.append(neural_sort_outputs[:, 0, :])
 
             return sampling_symbol_embedding, sampling_symbol_score
 
@@ -402,8 +385,8 @@ class NS_generator(RLModel):
             self.generator_name = 'NS_generator'
             self.train_order = tf.placeholder(tf.int64, [None, self.item_size])
             self.inference_order = tf.placeholder(tf.int64, [None, self.item_size])
-            
-            #引入一些关于evaluator的参数
+
+            # 引入一些关于evaluator的参数
             self.dnn_hidden_units = [512, 256, 128]
             self.all_feature_concatenation_evaluator = None
             self.sum_pooling_layer = None
@@ -419,7 +402,8 @@ class NS_generator(RLModel):
             self.evaluator_path = '/root/LAST/model/save_model_ad/10/202303091111_lambdaMART_LAST_evaluator_16_0.0005_0.0002_64_16_0.8_1.0'
             self.is_training = tf.placeholder(tf.bool)
             self.batch_size = tf.shape(self.itm_enc_input)[0]
-            self.score_format = 'iv'
+            self.score_format = 'pv'
+            self.raw_evaluator_input = self.build_evaluator_input(self.itm_spar_ph, self.itm_dens_ph)
 
         self.feature_augmentation()
 
@@ -433,12 +417,11 @@ class NS_generator(RLModel):
             self.rnn_decode()
 
         # judge of the evaluator's input is actor's (when training actor) or the raw data (when training evaluator)
-        if self.only_evaluator == True:
-            self.build_evaluator_input(self.itm_spar_ph, self.itm_dens_ph)
-        else:
-            self.build_evaluator_input(self.neural_sort_rl_sp_outputs, self.neural_sort_rl_de_outputs)
+        self.new_evaluator_input = tf.stack(self.neural_sort_outputs, axis=1)  # [B,N,D]
+        self.enc_input_evaluator = tf.cond(self.only_evaluator, lambda: self.raw_evaluator_input,
+                                           lambda: self.new_evaluator_input)
 
-        #应该是这一步之后将使用Neural_Sort排序后的结果传递
+        # 应该是这一步之后将使用Neural_Sort排序后的结果传递
         with tf.variable_scope("evaluator"):
             self.build_evaluator()
 
@@ -449,7 +432,7 @@ class NS_generator(RLModel):
             self.build_evaluator_loss()
 
     def build_actor_loss(self):
-        self.loss = tf.reduce_mean(-self.logits)
+        self.loss = tf.reduce_mean(-self.logits_pv)
 
         self.actor_opt()
 
@@ -470,31 +453,9 @@ class NS_generator(RLModel):
         else:
             self.train_step = self.optimizer.minimize(self.loss, var_list=trainable_var)
 
-    # def train(self, batch_data, lr, reg_lambda, keep_prop=0.8, train_prefer=0):
-    #     with self.graph.as_default():
-    #         _, total_loss, training_attention_distribution, training_prediction_order, predictions = \
-    #             self.sess.run(
-    #                 [self.train_step, self.loss, self.training_attention_distribution, self.training_prediction_order, self.predictions],
-    #                 feed_dict={
-    #                     self.usr_profile: np.reshape(np.array(batch_data[1]), [-1, self.profile_num]),
-    #                     self.itm_spar_ph: batch_data[2],
-    #                     self.itm_dens_ph: batch_data[3],
-    #                     self.seq_length_ph: batch_data[6],
-    #                     self.reg_lambda: reg_lambda,
-    #                     self.lr: lr,
-    #                     self.keep_prob: keep_prop,
-    #                     self.feed_train_order: False,
-    #                     self.train_order: None,
-    #                     self.is_train: True,
-    #                     self.only_evaluator: False,
-    #                     self.controllable_auc_prefer: train_prefer,
-    #                     self.controllable_prefer_vector: [[train_prefer, 1 - train_prefer]],
-    #                 })
-    #         return total_loss
-        
     def train(self, batch_data, lr, reg_lambda, keep_prop=0.8, train_prefer=1):
         with self.graph.as_default():
-            _, total_loss= \
+            _, total_loss = \
                 self.sess.run(
                     [self.train_step, self.loss],
                     feed_dict={
@@ -513,7 +474,7 @@ class NS_generator(RLModel):
                         self.controllable_prefer_vector: [[train_prefer, 1 - train_prefer]],
                     })
             return total_loss
-        
+
     def eval(self, batch_data, reg_lambda, eval_prefer=0, keep_prob=1, no_print=True):
         with self.graph.as_default():
             rerank_predict = self.sess.run(self.predictions,
@@ -531,24 +492,29 @@ class NS_generator(RLModel):
                                                self.keep_prob: 1})
             return rerank_predict, 0
 
-    #上面是generator部分，下面是拆解后的evaluator部分
+    # 上面是generator部分，下面是拆解后的evaluator部分
     def build_evaluator_loss(self):
         with tf.name_scope("CMR_evaluator_Loss_Op"):
             if self.score_format == 'pv':
                 loss_weight = tf.ones([self.batch_size, 1])  # [B,1]
                 if self.label_type == "total_num":  # label_ph: [B, N(0 or 1)]
-                                                      loss_weight = tf.reduce_sum(self.label_ph, axis=1)
-                                                      loss_weight = tf.where(loss_weight > 1, loss_weight, tf.ones_like(loss_weight))  # [B,1]
-                # label = tf.reshape(tf.minimum(tf.reduce_sum(self.label_ph, axis=1), 1.0), [-1, 1])  # [B,1]
-                label = tf.reshape(tf.reduce_sum(self.label_ph, axis=1), [-1, 1])  # [B,1]
-                self.print_loss = tf.print("label: ", tf.reshape(label, [1, -1]),
-                                        "\nlogits", tf.reshape(self.logits, [1, -1]),
-                                        "\nb_logits", self.before_sigmoid,
-                                        summarize=-1, output_stream=sys.stderr)
-                self.evaluator_loss = tf.nn.sigmoid_cross_entropy_with_logits(
-                    logits=self.logits,
-                    labels=label)
-                self.evaluator_loss = self.evaluator_loss * loss_weight  # [B,1]
+                    loss_weight = tf.reduce_sum(self.label_ph, axis=1)
+                    # loss_weight = tf.where(loss_weight > 1, loss_weight, tf.ones_like(loss_weight))  # [B,1]
+                one = tf.ones_like(loss_weight, dtype=tf.float32)
+                zero = tf.zeros_like(loss_weight, dtype=tf.float32)
+                self.pv_pos_loss = tf.losses.log_loss(one, self.logits_pv, loss_weight, reduction="weighted_mean")
+                self.pv_neg_loss = tf.losses.log_loss(zero, self.logits_pv, one, reduction="weighted_mean")
+                self.evaluator_loss = self.pv_pos_loss + self.pv_neg_loss
+                self.loss_weight = loss_weight
+                # label = tf.reshape(tf.reduce_sum(self.label_ph, axis=1), [-1, 1])  # [B,1]
+                # self.label = label
+                # self.print_loss = tf.print("label: ", tf.reshape(label, [1, -1]),
+                #                            "\nlogits", tf.reshape(self.logits, [1, -1]),
+                #                            summarize=-1, output_stream=sys.stderr)
+                # self.raw_evaluator_loss = tf.nn.sigmoid_cross_entropy_with_logits(
+                #     logits=self.logits_pv_before_sigmoid,
+                #     labels=label)
+                # self.evaluator_loss = self.raw_evaluator_loss * loss_weight  # [B,1]
                 self.evaluator_loss = tf.reduce_mean(self.evaluator_loss)
                 self.gap = self.evaluator_loss
             elif self.score_format == 'iv':
@@ -562,16 +528,16 @@ class NS_generator(RLModel):
             if 'bias' not in v.name and 'emb' not in v.name:
                 self.evaluator_loss += self.reg_lambda * tf.nn.l2_loss(v)
 
-        self.optimizer = tf.train.AdamOptimizer(self.lr)
+        self.evaluator_optimizer = tf.train.AdamOptimizer(self.lr)
 
         if self.max_grad_norm > 0:
-            grads_and_vars = self.optimizer.compute_gradients(self.evaluator_loss)
+            grads_and_vars = self.evaluator_optimizer.compute_gradients(self.evaluator_loss)
             for idx, (grad, var) in enumerate(grads_and_vars):
                 if grad is not None:
                     grads_and_vars[idx] = (tf.clip_by_norm(grad, self.max_grad_norm), var)
-            self.evaluator_train_step = self.optimizer.apply_gradients(grads_and_vars)
+            self.evaluator_train_step = self.evaluator_optimizer.apply_gradients(grads_and_vars)
         else:
-            self.evaluator_train_step = self.optimizer.minimize(self.evaluator_loss)
+            self.evaluator_train_step = self.evaluator_optimizer.minimize(self.evaluator_loss)
 
     def dnn_layer(self):
         dnn_layer = [self.sum_pooling_layer, self.concatenation_layer,
@@ -607,15 +573,15 @@ class NS_generator(RLModel):
         scope = f"evaluator/{self.evaluator_name}"
 
         # 通过Saver来恢复evaluator网络层的参数，只加载名字中包含self.name的变量
-        variables_to_restore = [var for var in tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES) 
-                            if self.evaluator_name in var.name]
-        
+        variables_to_restore = [var for var in tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
+                                if self.evaluator_name in var.name]
+
         # 创建一个Saver，来恢复变量
         self.saver = tf.train.Saver(var_list=variables_to_restore)
-        
+
         # 初始化所有变量
         self.sess.run(tf.global_variables_initializer())
-        
+
         # 恢复指定路径的模型参数
         self.saver.restore(self.sess, path)
         print(f"evaluator parameters loaded from {path}")
@@ -646,7 +612,8 @@ class NS_generator(RLModel):
     def multi_head_self_attention_channel(self):
         with tf.variable_scope(name_or_scope="{}_Multi_Head_Self_Attention_Channel".format(self.evaluator_name)):
             shape_list = self.all_feature_concatenation_evaluator.get_shape().as_list()
-            all_feature_concatenation_evaluator = tf.reshape(self.all_feature_concatenation_evaluator, [-1, self.pv_size, shape_list[2]])
+            all_feature_concatenation_evaluator = tf.reshape(self.all_feature_concatenation_evaluator,
+                                                             [-1, self.pv_size, shape_list[2]])
             queries = all_feature_concatenation_evaluator
             keys = all_feature_concatenation_evaluator
             mask = tf.cast(tf.ones_like(keys[:, :, 0]), dtype=tf.bool)
@@ -663,7 +630,7 @@ class NS_generator(RLModel):
                                              query_masks=mask,
                                              is_target_attention=False)
             self.multi_head_self_attention_layer = tf.reduce_sum(outputs, axis=1)
-                # 冻结此层的变量
+            # 冻结此层的变量
             # for var in tf.trainable_variables():
             #     if "multi_head_self_attention" in var.name:
             #         var.trainable = False
@@ -714,15 +681,17 @@ class NS_generator(RLModel):
         with tf.variable_scope(name):
             if self.score_format == 'pv':
                 logits = layers.linear(self.final_neurons, 1, trainable=False)
-                self.before_sigmoid = logits
+                self.logits_pv_before_sigmoid = tf.reshape(logits, [-1, 1])
                 logits = tf.sigmoid(logits)
                 predictions = tf.reshape(logits, [-1, 1])  # [B,1]
-                self.logits = predictions
+                self.logits_pv = predictions
+                self.logits = tf.tile(self.logits_pv, [1, self.max_time_len])
             elif self.score_format == 'iv':
                 logits = layers.linear(self.final_neurons, self.max_time_len, trainable=False)
-                logits = tf.reshape(tf.nn.softmax(logits), [-1, self.max_time_len])
+                logits = tf.reshape(logits, [-1, self.max_time_len])
+                logits = tf.nn.softmax(logits)
                 seq_mask = tf.sequence_mask(self.seq_length_ph, maxlen=self.max_time_len, dtype=tf.float32)
-                predictions = seq_mask*logits
+                predictions = seq_mask * logits
                 self.logits = predictions
         return predictions
 
@@ -752,17 +721,17 @@ class NS_generator(RLModel):
                 self.reg_lambda: reg_lambda,
                 self.keep_prob: keep_prob,
                 self.is_train: True,
+                self.only_evaluator: True,
                 self.feed_train_order: False,
                 self.train_order: np.zeros_like(batch_data[4]),
-                self.only_evaluator: True,
                 self.controllable_auc_prefer: train_prefer,
                 self.controllable_prefer_vector: [[train_prefer, 1 - train_prefer]],
             })
             return loss
 
-    def eval_evaluator(self, batch_data, reg_lambda, eval_prefer=0, keep_prob=1, no_print=True):
+    def eval_evaluator(self, batch_data, reg_lambda, eval_prefer=1, keep_prob=1, no_print=True):
         with self.graph.as_default():
-            pred, loss = self.sess.run([self.logits, self.evaluator_loss], feed_dict={
+            pred, loss, logit, weight = self.sess.run([self.logits, self.evaluator_loss, self.logits_pv, self.loss_weight], feed_dict={
                 self.usr_profile: np.reshape(np.array(batch_data[1]), [-1, self.profile_num]),
                 self.itm_spar_ph: batch_data[2],
                 self.itm_dens_ph: batch_data[3],
@@ -778,19 +747,3 @@ class NS_generator(RLModel):
                 self.controllable_prefer_vector: [[eval_prefer, 1 - eval_prefer]],
             })
             return pred.tolist(), loss
-
-    def eval(self, batch_data, reg_lambda, eval_prefer=0, keep_prob=1, no_print=True):
-        with self.graph.as_default():
-            rerank_predict = self.sess.run(self.predictions,
-                                           feed_dict={
-                                               self.usr_profile: np.reshape(np.array(batch_data[1]),
-                                                                            [-1, self.profile_num]),
-                                               self.itm_spar_ph: batch_data[2],
-                                               self.itm_dens_ph: batch_data[3],
-                                               self.seq_length_ph: batch_data[6],
-                                               self.is_train: False,
-                                               self.sample_phase: False,
-                                               self.controllable_auc_prefer: eval_prefer,
-                                               self.controllable_prefer_vector: [[eval_prefer, 1 - eval_prefer]],
-                                               self.keep_prob: 1})
-            return rerank_predict, 0
