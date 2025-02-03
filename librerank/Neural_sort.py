@@ -304,7 +304,7 @@ class NS_generator(RLModel):
                 attention_weights = tf.where(self.training_sampled_symbol > 0, self.neg_inf, attention_weights)  # [B,N]
             attention_weights = tf.nn.softmax(attention_weights)
 
-            attention_weights = tf.log(attention_weights + 1e-10) + self.gumbel_sampling(tf.shape(attention_weights), self.beta)    # [B,M]
+            attention_weights = tf.log(attention_weights + 1e-10) + gumbel_sampling(tf.shape(attention_weights), self.beta)    # [B,M]
 
             if self.training_sample_manner == "greedy":
                 # 1、greedy
