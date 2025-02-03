@@ -51,7 +51,9 @@ def neural_sort(values, rank_score, temperature_factor):
     p_sort = p_sort / temperature_factor    # [B,20,20]
     p_sort = tf.nn.softmax(p_sort)  # [B,20,20]
 
-    sorted_values = tf.matmul(p_sort, values)   # [B,20,20] * [B,20,D] = [B,20,D]
+    # 确保将 values 转换为 float32 类型
+    sorted_values = tf.matmul(tf.cast(p_sort, tf.float32), tf.cast(values, tf.float32))
+  # [B,20,20] * [B,20,D] = [B,20,D]
     # sorted_values = tf.Print(sorted_values, [p_sort[0], values[0], sorted_values[0]], message="check detail", first_n=10000, summarize=10000000)
 
     return sorted_values
@@ -504,6 +506,17 @@ def evaluator_metrics(data_batch, order, scope_number, model, evaluator):
         auc_rewards_ave[i].extend(ave_reward)
     return auc_rewards_sum, auc_rewards_ave
 
+def evaluator_metrics_ns(data_batch, order, scope_number, model):
+    rl_sp_outputs, rl_de_outputs = build_ft_chosen(data_batch, order)
+    auc_rewards = model.predict_evaluator(np.array(data_batch[1]), rl_sp_outputs, rl_de_outputs,
+                                    data_batch[6], data_batch)
+    auc_rewards_sum, auc_rewards_ave = [[] for _ in range(len(scope_number))], [[] for _ in range(len(scope_number))]
+    for i, scope in enumerate(scope_number):
+        sum_reward = np.sum(auc_rewards[:, :scope], axis=1)
+        ave_reward = [sum_reward[i] / min(scope, data_batch[6][i]) for i in range(len(sum_reward))]
+        auc_rewards_sum[i].extend(sum_reward)
+        auc_rewards_ave[i].extend(ave_reward)
+    return auc_rewards_sum, auc_rewards_ave
 
 def choose_best_step(metrics):  # [step_sizes, scope_num, B]
     return np.max(metrics, axis=0)

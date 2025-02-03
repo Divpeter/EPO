@@ -58,6 +58,46 @@ def eval(model, data, l2_reg, batch_size, isrank, metric_scope, _print=False,
     # return loss, res_low, res_high
     return loss, res
 
+def eval_ns(model, data, l2_reg, batch_size, isrank, metric_scope, _print=False):
+    preds = []
+    # labels = []
+    losses = []
+
+    data_size = len(data[0])
+    batch_num = data_size // batch_size
+    print('eval', batch_size, batch_num)
+
+
+    evaluator_sum, evaluator_ave = [[] for _ in range(len(metric_scope))], [[] for _ in range(len(metric_scope))]
+    t = time.time()
+    for batch_no in range(batch_num):
+        data_batch = get_aggregated_batch(data, batch_size=batch_size, batch_no=batch_no)
+        pred, loss = model.eval(data_batch, l2_reg)
+        preds.extend(pred)
+        # labels.extend(label)
+        losses.append(loss)
+       
+        order = [sorted(range(len(_pred)), key=lambda k: _pred[k], reverse=True) for _pred in pred]
+        batch_sum, batch_ave = evaluator_metrics_ns(data_batch, order, metric_scope, model)
+        for i in range(len(metric_scope)):
+            evaluator_sum[i].extend(batch_sum[i])
+            evaluator_ave[i].extend(batch_ave[i])
+
+    loss = sum(losses) / len(losses)
+    # cates = np.reshape(np.array(data[1])[:, :, 1], [-1, max_time_len]).tolist()
+    labels = data[4]
+    # print(preds[0], labels[0])
+    # poss = data[-2]
+    cate_ids = list(map(lambda a: [i[1] for i in a], data[2]))
+
+    res = list(evaluate_multi(labels, preds, cate_ids, metric_scope, isrank, _print))
+   
+    res.append(np.mean(np.array(evaluator_sum), axis=-1))
+    res.append(np.mean(np.array(evaluator_ave), axis=-1))
+
+    print("EVAL TIME: %.4fs" % (time.time() - t))
+    # return loss, res_low, res_high
+    return loss, res
 
 def eval_pv_evaluator(model, data, l2_reg, batch_size, isrank, metric_scope, _print=False):
     preds = []
@@ -222,23 +262,23 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
                              is_controllable=params.controllable)
 
         # 这里不再有evaluator了，需要将对应参数设定到generator整体的evaluator部分
-        if params.evaluator_type == 'cmr':
-            evaluator = CMR_evaluator(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
-                                      itm_dens_fnum,
-                                      profile_num, max_norm=params.max_norm)
-        elif params.evaluator_type == 'egr':
-            evaluator = EGR_evaluator(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
-                                      itm_dens_fnum,
-                                      profile_num, max_norm=params.max_norm)
-        elif params.evaluator_type == 'last':
-            evaluator = LAST_evaluator(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
-                                       itm_dens_fnum,
-                                       profile_num, max_norm=params.max_norm)
-        with evaluator.graph.as_default() as g:
-            sess = tf.Session(graph=g, config=tf.ConfigProto(gpu_options=gpu_options))
-            evaluator.set_sess(sess)
-            sess.run(tf.global_variables_initializer())
-            evaluator.load(params.evaluator_path)
+        # if params.evaluator_type == 'cmr':
+        #     evaluator = CMR_evaluator(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
+        #                               itm_dens_fnum,
+        #                               profile_num, max_norm=params.max_norm)
+        # elif params.evaluator_type == 'egr':
+        #     evaluator = EGR_evaluator(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
+        #                               itm_dens_fnum,
+        #                               profile_num, max_norm=params.max_norm)
+        # elif params.evaluator_type == 'last':
+        #     evaluator = LAST_evaluator(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
+        #                                itm_dens_fnum,
+        #                                profile_num, max_norm=params.max_norm)
+        # with model.graph.as_default() as g:
+        #     sess = tf.Session(graph=g, config=tf.ConfigProto(gpu_options=gpu_options))
+        #     model.set_sess(sess)
+        #     sess.run(tf.global_variables_initializer())
+
 
 
     elif params.model_type == 'LAST_generator':
@@ -264,9 +304,20 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
         sess.run(tf.global_variables_initializer())
         sess.run(tf.local_variables_initializer())
         model.set_sess(sess)
-        if params.reload_model == True:
-            model.load(params.reload_path)
-            print("reload ", params.reload_path)
+
+    #     # 假设你已经定义了evaluator部分的变量
+    #     evaluator_variables = [var for var in tf.trainable_variables() if "NS_evaluator" in var.name]
+        
+    #     # 创建一个Saver，只保存evaluator部分的变量
+    #     saver = tf.train.Saver(var_list=evaluator_variables)
+
+    #     model_path = '/root/LAST/model/save_model_ad/10/202303091111_lambdaMART_LAST_evaluator_16_0.0005_0.0002_64_16_0.8_1.0'
+    #     # 恢复evaluator部分的参数
+    #     load_evaluator_params(model, saver, sess, model_path, evaluator_variables)
+
+    #     if params.reload_model == True:
+    #         model.load(params.reload_path)
+    #         print("reload ", params.reload_path)
 
     training_monitor = {
         'train_loss': [],
@@ -329,7 +380,11 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
 
     if True:
         if not params.controllable:
-            vali_loss, res = eval(model, test_file, params.l2_reg, params.batch_size, False,
+            if  params.model_type == 'NS_generator' or params.model_type == 'NS_evaluator' :
+                vali_loss, res = eval_ns(model, test_file, params.l2_reg, params.batch_size, False,
+                                  params.metric_scope)
+            else:
+                vali_loss, res = eval(model, test_file, params.l2_reg, params.batch_size, False,
                                   params.metric_scope, with_evaluator=params.with_evaluator_metrics, evaluator=
                                   evaluator if params.with_evaluator_metrics else None)
             training_monitor['train_loss'].append(None)
@@ -537,12 +592,13 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
                                                        train_prefer=train_prefer)
                 auc_train_losses_step.append(auc_loss)
                 div_train_losses_step.append(div_loss)
+                
             elif params.model_type == 'NS_evaluator':
-                loss = model.train(data_batch, params.lr, params.l2_reg, params.keep_prob, train_prefer=train_prefer)
+                loss = model.train_evaluator(data_batch, params.lr, params.l2_reg, params.keep_prob, train_prefer=train_prefer)
                 auc_train_losses_step.append(loss)
             elif params.model_type == 'NS_generator':
-                loss = model.train_evaluator(data_batch, params.lr, params.l2_reg, params.keep_prob, train_prefer)
-
+                loss = model.train(data_batch, params.lr, params.l2_reg, params.keep_prob, train_prefer)
+                auc_train_losses_step.append(loss)
             elif params.model_type == 'Seq2Slate':  # [B, N, N]    [[0,0,1],[0,1,0],[1,0,0]]
                 act_idx_out, act_probs_one, rl_sp_outputs, rl_de_outputs, mask_arr, lp_sp_data, lp_de_data, _, enc_input, \
                 cate_chosen, cate_seq \
@@ -573,7 +629,11 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
                 div_train_losses_step = []
 
                 if not params.controllable:
-                    vali_loss, res = eval(model, test_file, params.l2_reg, params.batch_size, True,
+                    if  params.model_type == 'NS_generator' or params.model_type == 'NS_evaluator' :
+                        vali_loss, res = eval_ns(model, test_file, params.l2_reg, params.batch_size, True,
+                                  params.metric_scope)
+                    else:
+                        vali_loss, res = eval(model, test_file, params.l2_reg, params.batch_size, True,
                                           params.metric_scope, with_evaluator=params.with_evaluator_metrics,
                                           evaluator=evaluator if params.with_evaluator_metrics else None)
                     training_monitor['train_loss'].append(train_loss)
@@ -700,7 +760,7 @@ def reranker_parse_args():
     parser.add_argument('--max_time_len', default=10, type=int, help='max time length')
     parser.add_argument('--save_dir', type=str, default='./', help='dir that saves logs and model')
     parser.add_argument('--data_dir', type=str, default='./data/ad/', help='data dir')
-    parser.add_argument('--model_type', default='CMR_generator',
+    parser.add_argument('--model_type', default='NS_evaluator',
                         choices=['PRM', 'DLCM', 'SetRank', 'GSF', 'miDNN', 'Seq2Slate', 'EGR_evaluator',
                                  'EGR_generator', 'CMR_generator', 'CMR_evaluator', 'LAST_generator',
                                  'LAST_evaluator', 'NS_generator', 'NS_evaluator'],
@@ -728,7 +788,7 @@ def reranker_parse_args():
     parser.add_argument('--evaluator_path', type=str, default='', help='evaluator ckpt dir')
     parser.add_argument('--reload_path', type=str, default='', help='model ckpt dir')
     # parser.add_argument('--setting_path', type=str, default='./config/prm_setting.json', help='setting dir')
-    parser.add_argument('--setting_path', type=str, default='./example/config/ad/cmr_generator_setting.json',
+    parser.add_argument('--setting_path', type=str, default='./example/config/ad/ns_evaluator_setting.json',
                         help='setting dir')
     parser.add_argument('--controllable', type=bool, default=False, help='is controllable')
     parser.add_argument('--auc_rewards_type', type=str, default='iv', help='auc rewards type')

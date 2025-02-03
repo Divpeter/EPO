@@ -4,7 +4,8 @@ from tensorflow.contrib import layers
 from tensorflow.python.ops import rnn
 from librerank.prada_util_attention import *
 from librerank.utils import neural_sort
-import tensorflow.python.framework.ops as ops
+# import tensorflow.python.framework.ops as ops
+from tensorflow.python.framework import ops
 
 class NS_generator(RLModel):
 
@@ -167,7 +168,8 @@ class NS_generator(RLModel):
                                             "hyper_enc_dnn_2")  # [B*N or B, 1, 200]
 
     def build_evaluator_input(self, itm_spar_ph, itm_dens_ph):
-        self.itm_spar_emb = tf.gather(self.emb_mtx, itm_spar_ph)  # [? ,10(max_time_len), 5(itm_spar_num), 16(eb_dim)]
+        
+        self.itm_spar_emb = tf.gather(self.emb_mtx, tf.cast(itm_spar_ph, tf.int32))  # [?, 10, 5, 16]
         self.item_seq = tf.concat(
             [tf.reshape(self.itm_spar_emb, [-1, self.max_time_len, self.itm_spar_num * self.emb_dim]), itm_dens_ph],
             axis=-1)  # [?, 10, ft_num]
@@ -288,8 +290,8 @@ class NS_generator(RLModel):
         # self.print_loss = tf.print("training_sampled_symbol: ", self.training_sampled_symbol, output_stream=sys.stderr)
         # self.dd, self.ee = [], []
 
-        self.neural_sort_rl_sp_outputs = []
-        self.neural_sort_rl_de_outputs = []
+        # self.neural_sort_rl_sp_outputs = []
+        # self.neural_sort_rl_de_outputs = []
 
         #回头写进超参数里面
         self.temperature_factor = 1.0
@@ -341,9 +343,11 @@ class NS_generator(RLModel):
 
             #这里使用neural_sort完成对目标的排序，
             #和evaluator直接交互的是rl_sp ，rl_d，所以这里把排序后的格式和这个对齐应该就可以
-            self.neural_sort_rl_sp_output = neural_sort(self.itm_spar_ph, attention_weights, self.temperature_factor)
-            self.neural_sort_rl_de_output = neural_sort(self.itm_dens_ph, attention_weights, self.temperature_factor)
-            
+            self.neural_sort_rl_sp_outputs = neural_sort(self.itm_spar_ph, attention_weights, self.temperature_factor)
+            self.neural_sort_rl_de_outputs = neural_sort(self.itm_dens_ph, attention_weights, self.temperature_factor)
+            self.neural_sort_rl_sp_outputs = tf.reshape(self.neural_sort_rl_sp_outputs, [-1, self.max_time_len, self.itm_spar_num])
+            self.neural_sort_rl_de_outputs = tf.reshape(self.neural_sort_rl_de_outputs, [-1, self.max_time_len, self.itm_dens_num])
+
             return sampling_symbol_embedding, sampling_symbol_score
 
         return sampling_function
@@ -353,8 +357,8 @@ class NS_generator(RLModel):
 
         with tf.variable_scope("input"):
             self.train_phase = self.is_train
-            self.sample_phase = tf.placeholder(tf.bool, name="sample phase")  # True
-            self.only_evaluator = tf.placeholder(tf.bool, name="only evaluator")  # True
+            self.sample_phase = tf.placeholder(tf.bool, name="sample_phase")  # True
+            self.only_evaluator = tf.placeholder(tf.bool, name="only_evaluator")  # True
             self.mask_in_raw = tf.placeholder(tf.float32, [None])
             self.div_label = tf.placeholder(tf.float32, [None, self.max_time_len])
             self.auc_label = tf.placeholder(tf.float32, [None, self.max_time_len])
@@ -391,7 +395,7 @@ class NS_generator(RLModel):
             self.feed_context_vector = True
             self.feed_train_order = tf.placeholder(tf.bool)
             self.feed_inference_order = tf.placeholder(tf.bool)
-            self.name = 'NS_generator'
+            self.generator_name = 'NS_generator'
             self.train_order = tf.placeholder(tf.int64, [None, self.item_size])
             self.inference_order = tf.placeholder(tf.int64, [None, self.item_size])
             
@@ -403,7 +407,7 @@ class NS_generator(RLModel):
             self.multi_head_self_attention_layer = None
             self.rnn_layer = None
             self.pair_wise_comparison_layer = None
-            self.name = 'NS_evaluator'
+            self.evaluator_name = 'NS_evaluator'
             self.label_type = 'zero_one'
             self.feature_batch_norm = True
             self.N = self.item_size = self.pv_size = self.max_time_len
@@ -450,7 +454,7 @@ class NS_generator(RLModel):
             if 'bias' not in v.name and 'emb' not in v.name:
                 self.loss += self.reg_lambda * tf.nn.l2_loss(v)
         trainable_var = [var for var in ops.get_collection(ops.GraphKeys.TRAINABLE_VARIABLES) if
-                         (self.name not in var.name and "emb_mtx" not in var.name)]
+                         (self.evaluator_name not in var.name and "emb_mtx" not in var.name)]
         self.optimizer = tf.train.AdamOptimizer(self.lr)
 
         if self.max_grad_norm > 0:
@@ -462,11 +466,33 @@ class NS_generator(RLModel):
         else:
             self.train_step = self.optimizer.minimize(self.loss, var_list=trainable_var)
 
+    # def train(self, batch_data, lr, reg_lambda, keep_prop=0.8, train_prefer=0):
+    #     with self.graph.as_default():
+    #         _, total_loss, training_attention_distribution, training_prediction_order, predictions = \
+    #             self.sess.run(
+    #                 [self.train_step, self.loss, self.training_attention_distribution, self.training_prediction_order, self.predictions],
+    #                 feed_dict={
+    #                     self.usr_profile: np.reshape(np.array(batch_data[1]), [-1, self.profile_num]),
+    #                     self.itm_spar_ph: batch_data[2],
+    #                     self.itm_dens_ph: batch_data[3],
+    #                     self.seq_length_ph: batch_data[6],
+    #                     self.reg_lambda: reg_lambda,
+    #                     self.lr: lr,
+    #                     self.keep_prob: keep_prop,
+    #                     self.feed_train_order: False,
+    #                     self.train_order: None,
+    #                     self.is_train: True,
+    #                     self.only_evaluator: False,
+    #                     self.controllable_auc_prefer: train_prefer,
+    #                     self.controllable_prefer_vector: [[train_prefer, 1 - train_prefer]],
+    #                 })
+    #         return total_loss
+        
     def train(self, batch_data, lr, reg_lambda, keep_prop=0.8, train_prefer=0):
         with self.graph.as_default():
-            _, total_loss, training_attention_distribution, training_prediction_order, predictions = \
+            _, total_loss= \
                 self.sess.run(
-                    [self.train_step, self.loss, self.training_attention_distribution, self.training_prediction_order, self.predictions],
+                    [self.train_step, self.loss],
                     feed_dict={
                         self.usr_profile: np.reshape(np.array(batch_data[1]), [-1, self.profile_num]),
                         self.itm_spar_ph: batch_data[2],
@@ -477,11 +503,13 @@ class NS_generator(RLModel):
                         self.keep_prob: keep_prop,
                         self.is_train: True,
                         self.only_evaluator: False,
+                        self.feed_train_order: False,
+                        self.train_order: np.zeros_like(batch_data[4]),
                         self.controllable_auc_prefer: train_prefer,
                         self.controllable_prefer_vector: [[train_prefer, 1 - train_prefer]],
                     })
-            return total_loss, auc_loss
-
+            return total_loss
+        
     def eval(self, batch_data, reg_lambda, eval_prefer=0, keep_prob=1, no_print=True):
         with self.graph.as_default():
             rerank_predict = self.sess.run(self.predictions,
@@ -546,7 +574,7 @@ class NS_generator(RLModel):
                      self.multi_head_self_attention_layer, self.rnn_layer, self.pair_wise_comparison_layer]
         dnn_layer = tf.concat(values=dnn_layer, axis=-1)
         if self.feature_batch_norm:
-            with tf.variable_scope(name_or_scope="{}_Input_BatchNorm".format(self.name)):
+            with tf.variable_scope(name_or_scope="{}_Input_BatchNorm".format(self.evaluator_name)):
                 dnn_layer = tf.contrib.layers.batch_norm(dnn_layer, is_training=self.is_train, scale=True)
         self.dnn_input = dnn_layer
         self.final_neurons = self.get_dnn(self.dnn_input, self.dnn_hidden_units, [tf.nn.relu, tf.nn.relu, tf.nn.relu],
@@ -565,14 +593,21 @@ class NS_generator(RLModel):
             self.dnn_layer()
             self.logits_layer()
             # 之后加载指定路径的evaluator参数
-            self.load_evaluator_params(self.evaluator_path)
+            # self.load_evaluator_params(self.evaluator_path)
 
     def load_evaluator_params(self, path):
         """
         加载evaluator的预训练参数
         """
-        # 通过Saver来恢复evaluator网络层的参数
-        self.saver = tf.train.Saver(var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="evaluator"))
+        # 创建一个 scope 以包含 self.name
+        scope = f"evaluator/{self.evaluator_name}"
+
+        # 通过Saver来恢复evaluator网络层的参数，只加载名字中包含self.name的变量
+        variables_to_restore = [var for var in tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES) 
+                            if self.evaluator_name in var.name]
+        
+        # 创建一个Saver，来恢复变量
+        self.saver = tf.train.Saver(var_list=variables_to_restore)
         
         # 初始化所有变量
         self.sess.run(tf.global_variables_initializer())
@@ -582,14 +617,14 @@ class NS_generator(RLModel):
         print(f"evaluator parameters loaded from {path}")
 
     def sum_pooling_channel(self):
-        with tf.variable_scope(name_or_scope="{}_Sum_Pooling_Channel".format(self.name)):
+        with tf.variable_scope(name_or_scope="{}_Sum_Pooling_Channel".format(self.evaluator_name)):
             self.sum_pooling_layer = tf.reduce_sum(self.all_feature_concatenation_evaluator, axis=1)
-            for var in tf.trainable_variables():
-                if "sum_pooling" in var.name:
-                    var.trainable = False
+            # for var in tf.trainable_variables():
+            #     if "sum_pooling" in var.name:
+            #         var.trainable = False
 
     def concatenation_channel(self):
-        with tf.variable_scope(name_or_scope="{}_Concatenation_Channel".format(self.name)) as scope:
+        with tf.variable_scope(name_or_scope="{}_Concatenation_Channel".format(self.evaluator_name)) as scope:
             running_layer = layers.fully_connected(
                 self.all_feature_concatenation_evaluator,
                 16,
@@ -600,12 +635,12 @@ class NS_generator(RLModel):
             self.concatenation_layer = tf.reshape(running_layer,
                                                   [-1, self.pv_size * running_layer.get_shape().as_list()[2]])
             # 冻结此层的变量
-            for var in tf.trainable_variables():
-                if "concatenation_channel" in var.name:
-                    var.trainable = False
+            # for var in tf.trainable_variables():
+            #     if "concatenation_channel" in var.name:
+            #         var.trainable = False
 
     def multi_head_self_attention_channel(self):
-        with tf.variable_scope(name_or_scope="{}_Multi_Head_Self_Attention_Channel".format(self.name)):
+        with tf.variable_scope(name_or_scope="{}_Multi_Head_Self_Attention_Channel".format(self.evaluator_name)):
             shape_list = self.all_feature_concatenation_evaluator.get_shape().as_list()
             all_feature_concatenation_evaluator = tf.reshape(self.all_feature_concatenation_evaluator, [-1, self.pv_size, shape_list[2]])
             queries = all_feature_concatenation_evaluator
@@ -625,12 +660,12 @@ class NS_generator(RLModel):
                                              is_target_attention=False)
             self.multi_head_self_attention_layer = tf.reduce_sum(outputs, axis=1)
                 # 冻结此层的变量
-            for var in tf.trainable_variables():
-                if "multi_head_self_attention" in var.name:
-                    var.trainable = False
+            # for var in tf.trainable_variables():
+            #     if "multi_head_self_attention" in var.name:
+            #         var.trainable = False
 
     def rnn_channel(self):
-        with tf.variable_scope(name_or_scope="{}_RNN_Channel".format(self.name)):
+        with tf.variable_scope(name_or_scope="{}_RNN_Channel".format(self.evaluator_name)):
             # one can reverse self.all_feature_concatenation_evaluator and make it a Bi-GRU
             encoder_cell = tf.nn.rnn_cell.GRUCell(64)
             rnn_inputs = tf.transpose(self.all_feature_concatenation_evaluator, perm=[1, 0, 2])  # [N,B,E]
@@ -641,21 +676,21 @@ class NS_generator(RLModel):
             output = tf.concat(axis=1, values=output)
             self.rnn_layer = tf.reduce_sum(output, axis=1)
             # 冻结此层的变量
-            for var in tf.trainable_variables():
-                if "rnn_channel" in var.name:
-                    var.trainable = False
+            # for var in tf.trainable_variables():
+            #     if "rnn_channel" in var.name:
+            #         var.trainable = False
 
     def pair_wise_comparison_channel(self):
-        with tf.variable_scope(name_or_scope="{}_Pair_Wise_Comparison_Channel".format(self.name)):
+        with tf.variable_scope(name_or_scope="{}_Pair_Wise_Comparison_Channel".format(self.evaluator_name)):
             input_transposed = tf.transpose(self.all_feature_concatenation_evaluator, perm=[0, 2, 1])
             output = tf.matmul(self.all_feature_concatenation_evaluator, input_transposed)
             self.pair_wise_comparison_layer = tf.reshape(output, [-1, self.pv_size * self.pv_size])
             # 冻结此层的变量
-            for var in tf.trainable_variables():
-                if "pair_wise_comparison_channel" in var.name:
-                    var.trainable = False
+            # for var in tf.trainable_variables():
+            #     if "pair_wise_comparison_channel" in var.name:
+            #         var.trainable = False
 
-    def get_dnn(self, x, layer_nums, layer_acts, name="dnn"):
+    def get_dnn(self, x, layer_nums, layer_acts, name="NS_evaluator_dnn"):
         input_ft = x
         assert len(layer_nums) == len(layer_acts)
         with tf.variable_scope(name):
@@ -669,30 +704,33 @@ class NS_generator(RLModel):
                     trainable=False)
         return input_ft
 
-    def logits_layer(self):
+    def logits_layer(self, name="NS_evaluator_logits_layer"):
         # with tf.variable_scope(name_or_scope="{}_Logits".format(self.name)) as dnn_logits_scope:
         #     logits = layers.linear(self.final_neurons, 1, scope=dnn_logits_scope)
-        if self.score_format == 'pv':
-            logits = layers.linear(self.final_neurons, 1, trainable=False)
-            self.before_sigmoid = logits
-            logits = tf.sigmoid(logits)
-            predictions = tf.reshape(logits, [-1, 1])  # [B,1]
-            self.logits = predictions
-        elif self.score_format == 'iv':
-            logits = layers.linear(self.final_neurons, self.max_time_len, trainable=False)
-            logits = tf.reshape(tf.nn.softmax(logits), [-1, self.max_time_len])
-            seq_mask = tf.sequence_mask(self.seq_length_ph, maxlen=self.max_time_len, dtype=tf.float32)
-            predictions = seq_mask*logits
-            self.logits = predictions
+        with tf.variable_scope(name):
+            if self.score_format == 'pv':
+                logits = layers.linear(self.final_neurons, 1, trainable=False)
+                self.before_sigmoid = logits
+                logits = tf.sigmoid(logits)
+                predictions = tf.reshape(logits, [-1, 1])  # [B,1]
+                self.logits = predictions
+            elif self.score_format == 'iv':
+                logits = layers.linear(self.final_neurons, self.max_time_len, trainable=False)
+                logits = tf.reshape(tf.nn.softmax(logits), [-1, self.max_time_len])
+                seq_mask = tf.sequence_mask(self.seq_length_ph, maxlen=self.max_time_len, dtype=tf.float32)
+                predictions = seq_mask*logits
+                self.logits = predictions
         return predictions
 
-    def predict_evaluator(self, usr_ft, item_spar_fts, item_dens_fts, seq_len):
+    def predict_evaluator(self, usr_ft, item_spar_fts, item_dens_fts, seq_len, batch_data):
         with self.graph.as_default():
             ctr_probs = self.sess.run(self.logits, feed_dict={
                 self.usr_profile: np.reshape(usr_ft, [-1, self.profile_num]),
                 self.itm_spar_ph: item_spar_fts.reshape([-1, self.max_time_len, self.itm_spar_num]),
                 self.itm_dens_ph: item_dens_fts.reshape([-1, self.max_time_len, self.itm_dens_num]),
                 self.seq_length_ph: seq_len,
+                self.feed_train_order: False,
+                self.train_order: np.zeros_like(batch_data[4]),
                 self.only_evaluator: True,
                 self.is_train: False,
                 self.keep_prob: 1.0})
@@ -700,7 +738,7 @@ class NS_generator(RLModel):
 
     def train_evaluator(self, batch_data, lr, reg_lambda, keep_prob=0.8, train_prefer=1):
         with self.graph.as_default():
-            loss, _ = self.sess.run([self.loss, self.train_step], feed_dict={
+            loss, _ = self.sess.run([self.evaluator_loss, self.evaluator_train_step], feed_dict={
                 self.usr_profile: np.reshape(np.array(batch_data[1]), [-1, self.profile_num]),
                 self.itm_spar_ph: batch_data[2],
                 self.itm_dens_ph: batch_data[3],
@@ -710,6 +748,8 @@ class NS_generator(RLModel):
                 self.reg_lambda: reg_lambda,
                 self.keep_prob: keep_prob,
                 self.is_train: True,
+                self.feed_train_order: False,
+                self.train_order: np.zeros_like(batch_data[4]),
                 self.only_evaluator: True,
                 self.controllable_auc_prefer: train_prefer,
                 self.controllable_prefer_vector: [[train_prefer, 1 - train_prefer]],
@@ -732,3 +772,19 @@ class NS_generator(RLModel):
                 self.controllable_prefer_vector: [[eval_prefer, 1 - eval_prefer]],
             })
             return pred.tolist(), loss
+
+    def eval(self, batch_data, reg_lambda, eval_prefer=0, keep_prob=1, no_print=True):
+        with self.graph.as_default():
+            rerank_predict = self.sess.run(self.predictions,
+                                           feed_dict={
+                                               self.usr_profile: np.reshape(np.array(batch_data[1]),
+                                                                            [-1, self.profile_num]),
+                                               self.itm_spar_ph: batch_data[2],
+                                               self.itm_dens_ph: batch_data[3],
+                                               self.seq_length_ph: batch_data[6],
+                                               self.is_train: False,
+                                               self.sample_phase: False,
+                                               self.controllable_auc_prefer: eval_prefer,
+                                               self.controllable_prefer_vector: [[eval_prefer, 1 - eval_prefer]],
+                                               self.keep_prob: 1})
+            return rerank_predict, 0
