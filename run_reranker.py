@@ -58,7 +58,7 @@ def eval(model, data, l2_reg, batch_size, isrank, metric_scope, _print=False,
     # return loss, res_low, res_high
     return loss, res
 
-def eval_ns(model, data, l2_reg, batch_size, isrank, metric_scope, _print=False):
+def eval_ns(model, data, l2_reg, batch_size, isrank, metric_scope, is_generator, _print=False):
     preds = []
     # labels = []
     losses = []
@@ -72,7 +72,12 @@ def eval_ns(model, data, l2_reg, batch_size, isrank, metric_scope, _print=False)
     t = time.time()
     for batch_no in range(batch_num):
         data_batch = get_aggregated_batch(data, batch_size=batch_size, batch_no=batch_no)
-        pred, loss = model.eval(data_batch, l2_reg)
+
+        if is_generator:
+            pred, loss = model.eval(data_batch, l2_reg)
+        else:
+            pred, loss = model.eval_evaluator(data_batch, l2_reg)
+
         preds.extend(pred)
         # labels.extend(label)
         losses.append(loss)
@@ -304,6 +309,8 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
         sess.run(tf.global_variables_initializer())
         sess.run(tf.local_variables_initializer())
         model.set_sess(sess)
+    if params.model_type == 'NS_generator':
+        model.load(params.evaluator_path)
 
     #     # 假设你已经定义了evaluator部分的变量
     #     evaluator_variables = [var for var in tf.trainable_variables() if "NS_evaluator" in var.name]
@@ -380,9 +387,12 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
 
     if True:
         if not params.controllable:
-            if  params.model_type == 'NS_generator' or params.model_type == 'NS_evaluator' :
+            if  params.model_type == 'NS_generator':
                 vali_loss, res = eval_ns(model, test_file, params.l2_reg, params.batch_size, False,
-                                  params.metric_scope)
+                                  params.metric_scope, True)
+            elif params.model_type == 'NS_evaluator':
+                vali_loss, res = eval_ns(model, test_file, params.l2_reg, params.batch_size, False,
+                                  params.metric_scope, False)
             else:
                 vali_loss, res = eval(model, test_file, params.l2_reg, params.batch_size, False,
                                   params.metric_scope, with_evaluator=params.with_evaluator_metrics, evaluator=
@@ -629,9 +639,12 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
                 div_train_losses_step = []
 
                 if not params.controllable:
-                    if  params.model_type == 'NS_generator' or params.model_type == 'NS_evaluator' :
+                    if  params.model_type == 'NS_generator' :
                         vali_loss, res = eval_ns(model, test_file, params.l2_reg, params.batch_size, True,
-                                  params.metric_scope)
+                                  params.metric_scope, True)
+                    elif params.model_type == 'NS_evaluator':
+                        vali_loss, res = eval_ns(model, test_file, params.l2_reg, params.batch_size, True,
+                                  params.metric_scope, False)
                     else:
                         vali_loss, res = eval(model, test_file, params.l2_reg, params.batch_size, True,
                                           params.metric_scope, with_evaluator=params.with_evaluator_metrics,
@@ -796,6 +809,8 @@ def reranker_parse_args():
     parser.add_argument('--evaluator_type', type=str, default='cmr', help='evaluator_type')
     parser.add_argument('--with_evaluator_metrics', type=bool, default=False, help='with_evaluator_metrics')
     parser.add_argument('--reload_model', type=bool, default=False, help='reload model')
+    parser.add_argument('--bata', default=1.0, type=float, help='gumbel noise sampling')
+    parser.add_argument('--temperature', default=1.0, type=float, help='neural sort')
     FLAGS, _ = parser.parse_known_args()
     return FLAGS
 

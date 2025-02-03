@@ -12,7 +12,7 @@
   "epoch_num": 50,
   "save_dir": "./model/",
   "data_dir": "./Data/ad/",
-  "evaluator_path": "./model/save_model_ad/10/202301112253_lambdaMART_CMR_evaluator_16_0.0005_0.0002_64_16_0.8_1.0",
+  "evaluator_path": "./model//save_model_ad/10/202502031537_lambdaMART_NS_evaluator_16_0.0005_0.0002_64_16_0.8_1.0",
   "controllable": false,
   "with_evaluator_metrics": true,
   "auc_rewards_type": "iv",

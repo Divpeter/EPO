@@ -58,6 +58,10 @@ def neural_sort(values, rank_score, temperature_factor):
 
     return sorted_values
 
+def gumbel_sampling( sampling_shape, beta):
+    epsilon = 1e-10
+    U = tf.random_uniform(sampling_shape, minval=0, maxval=1)
+    return -beta * tf.log(-tf.log(U + epsilon) + epsilon)
 
 def normalize(v):
     v = np.array(v)

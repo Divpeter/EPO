@@ -4,6 +4,7 @@ from tensorflow.contrib import layers
 from tensorflow.python.ops import rnn
 from librerank.prada_util_attention import *
 from librerank.utils import neural_sort
+from librerank.utils import gumbel_sampling
 # import tensorflow.python.framework.ops as ops
 from tensorflow.python.framework import ops
 
@@ -295,12 +296,15 @@ class NS_generator(RLModel):
 
         #回头写进超参数里面
         self.temperature_factor = 1.0
+        self.beta  = 1.0
 
         def sampling_function(attention_weights, _):
             attention_weights = attention_weights
             if self.use_masking:
                 attention_weights = tf.where(self.training_sampled_symbol > 0, self.neg_inf, attention_weights)  # [B,N]
             attention_weights = tf.nn.softmax(attention_weights)
+
+            attention_weights = tf.log(attention_weights + 1e-10) + self.gumbel_sampling(tf.shape(attention_weights), self.beta)    # [B,M]
 
             if self.training_sample_manner == "greedy":
                 # 1、greedy
@@ -758,7 +762,7 @@ class NS_generator(RLModel):
 
     def eval_evaluator(self, batch_data, reg_lambda, eval_prefer=0, keep_prob=1, no_print=True):
         with self.graph.as_default():
-            pred, loss = self.sess.run([self.logits, self.loss], feed_dict={
+            pred, loss = self.sess.run([self.logits, self.evaluator_loss], feed_dict={
                 self.usr_profile: np.reshape(np.array(batch_data[1]), [-1, self.profile_num]),
                 self.itm_spar_ph: batch_data[2],
                 self.itm_dens_ph: batch_data[3],
@@ -768,6 +772,8 @@ class NS_generator(RLModel):
                 self.keep_prob: keep_prob,
                 self.is_train: False,
                 self.only_evaluator: True,
+                self.feed_train_order: False,
+                self.train_order: np.zeros_like(batch_data[4]),
                 self.controllable_auc_prefer: eval_prefer,
                 self.controllable_prefer_vector: [[eval_prefer, 1 - eval_prefer]],
             })
