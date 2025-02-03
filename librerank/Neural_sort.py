@@ -304,7 +304,7 @@ class NS_generator(RLModel):
                 attention_weights = tf.where(self.training_sampled_symbol > 0, self.neg_inf, attention_weights)  # [B,N]
             attention_weights = tf.nn.softmax(attention_weights)
 
-            attention_weights = tf.log(attention_weights + 1e-10) + gumbel_sampling(tf.shape(attention_weights), self.beta)    # [B,M]
+            # attention_weights = tf.log(attention_weights + 1e-10) + gumbel_sampling(tf.shape(attention_weights), self.beta)    # [B,M]
 
             if self.training_sample_manner == "greedy":
                 # 1、greedy
@@ -492,7 +492,7 @@ class NS_generator(RLModel):
     #                 })
     #         return total_loss
         
-    def train(self, batch_data, lr, reg_lambda, keep_prop=0.8, train_prefer=0):
+    def train(self, batch_data, lr, reg_lambda, keep_prop=0.8, train_prefer=1):
         with self.graph.as_default():
             _, total_loss= \
                 self.sess.run(

@@ -260,6 +260,7 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
             sess.run(tf.global_variables_initializer())
             evaluator.load(params.evaluator_path)
     elif params.model_type == 'NS_generator' or params.model_type == 'NS_evaluator':
+        params.acc_prefer = 1.0
         model = NS_generator(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
                              itm_dens_fnum,
                              profile_num, max_norm=params.max_norm, rep_num=params.rep_num,
@@ -311,6 +312,7 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
         model.set_sess(sess)
     if params.model_type == 'NS_generator':
         model.load(params.evaluator_path)
+        print("NS evaluator loaded")
 
     #     # 假设你已经定义了evaluator部分的变量
     #     evaluator_variables = [var for var in tf.trainable_variables() if "NS_evaluator" in var.name]
@@ -604,9 +606,11 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
                 div_train_losses_step.append(div_loss)
                 
             elif params.model_type == 'NS_evaluator':
+                train_prefer = 1
                 loss = model.train_evaluator(data_batch, params.lr, params.l2_reg, params.keep_prob, train_prefer=train_prefer)
                 auc_train_losses_step.append(loss)
             elif params.model_type == 'NS_generator':
+                train_prefer = 1
                 loss = model.train(data_batch, params.lr, params.l2_reg, params.keep_prob, train_prefer)
                 auc_train_losses_step.append(loss)
             elif params.model_type == 'Seq2Slate':  # [B, N, N]    [[0,0,1],[0,1,0],[1,0,0]]
@@ -773,7 +777,7 @@ def reranker_parse_args():
     parser.add_argument('--max_time_len', default=10, type=int, help='max time length')
     parser.add_argument('--save_dir', type=str, default='./', help='dir that saves logs and model')
     parser.add_argument('--data_dir', type=str, default='./data/ad/', help='data dir')
-    parser.add_argument('--model_type', default='NS_evaluator',
+    parser.add_argument('--model_type', default='NS_generator',
                         choices=['PRM', 'DLCM', 'SetRank', 'GSF', 'miDNN', 'Seq2Slate', 'EGR_evaluator',
                                  'EGR_generator', 'CMR_generator', 'CMR_evaluator', 'LAST_generator',
                                  'LAST_evaluator', 'NS_generator', 'NS_evaluator'],
@@ -801,7 +805,7 @@ def reranker_parse_args():
     parser.add_argument('--evaluator_path', type=str, default='', help='evaluator ckpt dir')
     parser.add_argument('--reload_path', type=str, default='', help='model ckpt dir')
     # parser.add_argument('--setting_path', type=str, default='./config/prm_setting.json', help='setting dir')
-    parser.add_argument('--setting_path', type=str, default='./example/config/ad/ns_evaluator_setting.json',
+    parser.add_argument('--setting_path', type=str, default='./example/config/ad/ns_generator_setting.json',
                         help='setting dir')
     parser.add_argument('--controllable', type=bool, default=False, help='is controllable')
     parser.add_argument('--auc_rewards_type', type=str, default='iv', help='auc rewards type')
