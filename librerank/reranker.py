@@ -342,7 +342,6 @@ class BaseModel(object):
         else:
             self.train_step = self.optimizer.minimize(self.loss)
 
-
     def multihead_attention(self,
                             queries,
                             keys,

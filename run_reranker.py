@@ -290,7 +290,8 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
         sess.run(tf.local_variables_initializer())
         model.set_sess(sess)
     if params.model_type == 'NS_generator':
-        model.load(params.evaluator_path)
+        # model.load(params.evaluator_path)
+        model.load_evaluator_params(params.evaluator_path)
         print("NS evaluator loaded")
 
     #     # 假设你已经定义了evaluator部分的变量
@@ -774,7 +775,7 @@ def reranker_parse_args():
     parser.add_argument('--evaluator_path', type=str, default='', help='evaluator ckpt dir')
     parser.add_argument('--reload_path', type=str, default='', help='model ckpt dir')
     # parser.add_argument('--setting_path', type=str, default='./config/prm_setting.json', help='setting dir')
-    parser.add_argument('--setting_path', type=str, default='./example/config/ad/ns_evaluator_setting.json',
+    parser.add_argument('--setting_path', type=str, default='./example/config/ad/ns_generator_setting.json',
                         help='setting dir')
     parser.add_argument('--controllable', type=bool, default=False, help='is controllable')
     parser.add_argument('--auc_rewards_type', type=str, default='iv', help='auc rewards type')
