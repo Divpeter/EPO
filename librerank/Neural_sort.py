@@ -400,7 +400,7 @@ class NS_generator(RLModel):
             self.feature_batch_norm = True
             self.N = self.item_size = self.pv_size = self.max_time_len
             self.use_BN = True
-            self.evaluator_path = '/root/LAST/model/save_model_ad/10/202303091111_lambdaMART_LAST_evaluator_16_0.0005_0.0002_64_16_0.8_1.0'
+            self.evaluator_path = '/root/LAST/model/save_model_ad/10/202502041115_lambdaMART_NS_evaluator_512_0.0005_0.0002_64_16_0.8_1.0'
             self.is_training = tf.placeholder(tf.bool)
             self.batch_size = tf.shape(self.itm_enc_input)[0]
             self.score_format = 'pv'
