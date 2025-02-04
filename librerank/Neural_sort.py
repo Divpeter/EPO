@@ -153,8 +153,7 @@ class NS_generator(RLModel):
         self.enc_input = self.all_feature_concatenation
         self.encoder_states = self.get_dnn(self.enc_input, [200], [tf.nn.relu], "enc_dnn_1")  # [B*N or B, N, 200]
         self.final_state = tf.reduce_sum(self.encoder_states, axis=1)  # [B*N or B, 1, 200]
-        self.final_state = self.get_dnn(self.final_state, [self.lstm_hidden_units], [tf.nn.relu],
-                                        "enc_dnn_2")  # [B*N or B, 1, 200]
+        self.final_state = self.get_dnn(self.final_state, [self.lstm_hidden_units], [tf.nn.relu], "enc_dnn_2")  # [B*N or B, 1, 200]
 
     def build_evaluator_input(self, itm_spar_ph, itm_dens_ph):
         self.itm_spar_emb = tf.gather(self.emb_mtx, tf.cast(itm_spar_ph, tf.int32))  # [?, 10, 5, 16]
@@ -291,6 +290,7 @@ class NS_generator(RLModel):
                 attention_weights = tf.where(self.training_sampled_symbol > 0, self.neg_inf, attention_weights)  # [B,N]
             attention_weights = tf.nn.softmax(attention_weights)
 
+            # attention_weights = tf.log(attention_weights + 1e-10)
             attention_weights = tf.log(attention_weights + 1e-10) + gumbel_sampling(tf.shape(attention_weights),
                                                                                     self.beta)  # [B,M]
 
@@ -299,9 +299,7 @@ class NS_generator(RLModel):
                 sampling_symbol = tf.argmax(attention_weights, 1)  # [B,N] -> [B]
             else:
                 # 2、sample
-                sampling_symbol = tf.squeeze(tf.multinomial(tf.log(attention_weights), 1), axis=-1)  # [B,N] -> [B]
-                sampling_symbol = tf.cond(self.feed_train_order, lambda: tf.transpose(self.train_order)[_ - 1, :],
-                                          lambda: sampling_symbol)
+                sampling_symbol = tf.argmax(attention_weights, 1)  # [B,N] -> [B]
 
             sampling_symbol = tf.cast(sampling_symbol, tf.int32)  # [B]
             self.training_prediction_order.append(sampling_symbol)
@@ -376,7 +374,7 @@ class NS_generator(RLModel):
             self.batch_size = self.dec_input.get_shape()[0].value
             self.N = self.item_size
             self.use_masking = True
-            self.training_sample_manner = 'sample'
+            self.training_sample_manner = 'greedy'
             self.sample_manner = 'greedy'
             self.pv_size = self.N
             self.attention_head_nums = 2
@@ -403,7 +401,7 @@ class NS_generator(RLModel):
             self.evaluator_path = '/root/LAST/model/save_model_ad/10/202502041115_lambdaMART_NS_evaluator_512_0.0005_0.0002_64_16_0.8_1.0'
             self.is_training = tf.placeholder(tf.bool)
             self.batch_size = tf.shape(self.itm_enc_input)[0]
-            self.score_format = 'pv'
+            self.score_format = 'iv'
             self.raw_evaluator_input = self.build_evaluator_input(self.itm_spar_ph, self.itm_dens_ph)
 
         self.feature_augmentation()
@@ -423,7 +421,7 @@ class NS_generator(RLModel):
                                            lambda: self.new_evaluator_input)
 
         # 应该是这一步之后将使用Neural_Sort排序后的结果传递
-        with tf.variable_scope("evaluator"):
+        with tf.variable_scope(self.evaluator_name, reuse=tf.AUTO_REUSE):
             self.build_evaluator()
 
         with tf.variable_scope("loss"):
@@ -432,9 +430,16 @@ class NS_generator(RLModel):
         with tf.variable_scope("evaluator_loss"):
             self.build_evaluator_loss()
 
-    def build_actor_loss(self):
-        self.loss = tf.reduce_mean(-self.logits_pv)
+    def compute_dcg_pv_loss(self, logits):
+        discount_factors = tf.math.log(tf.cast(tf.range(1, self.N + 1), tf.float32) + 1.0) / tf.math.log(2.0)
+        dcg = tf.reduce_sum(logits * discount_factors, axis=1)
+        return dcg
 
+    def build_actor_loss(self):
+        if self.score_format == 'pv':
+            self.loss = tf.reduce_mean(-self.logits_pv)
+        elif self.score_format == 'iv':
+            self.loss = tf.reduce_mean(-self.compute_dcg_pv_loss(self.logits))
         self.actor_opt()
 
     def actor_opt(self):
@@ -495,7 +500,7 @@ class NS_generator(RLModel):
 
     # 上面是generator部分，下面是拆解后的evaluator部分
     def build_evaluator_loss(self):
-        with tf.name_scope("CMR_evaluator_Loss_Op"):
+        with tf.name_scope("NS_evaluator_Loss_Op"):
             if self.score_format == 'pv':
                 loss_weight = tf.ones([self.batch_size, 1])  # [B,1]
                 if self.label_type == "total_num":  # label_ph: [B, N(0 or 1)]
@@ -508,16 +513,9 @@ class NS_generator(RLModel):
                 self.pv_pos_loss = tf.losses.log_loss(one, self.logits_pv, loss_weight, reduction="weighted_mean")
                 self.pv_neg_loss = tf.losses.log_loss(zero, self.logits_pv, one, reduction="weighted_mean")
                 self.evaluator_loss = self.pv_pos_loss + self.pv_neg_loss
+                # self.evaluator_loss = tf.reduce_mean(tf.square(self.logits_pv - loss_weight))
                 self.loss_weight = loss_weight
                 # label = tf.reshape(tf.reduce_sum(self.label_ph, axis=1), [-1, 1])  # [B,1]
-                # self.label = label
-                # self.print_loss = tf.print("label: ", tf.reshape(label, [1, -1]),
-                #                            "\nlogits", tf.reshape(self.logits, [1, -1]),
-                #                            summarize=-1, output_stream=sys.stderr)
-                # self.raw_evaluator_loss = tf.nn.sigmoid_cross_entropy_with_logits(
-                #     logits=self.logits_pv_before_sigmoid,
-                #     labels=label)
-                # self.evaluator_loss = self.raw_evaluator_loss * loss_weight  # [B,1]
                 self.evaluator_loss = tf.reduce_mean(self.evaluator_loss)
                 self.gap = self.evaluator_loss
             elif self.score_format == 'iv':
@@ -551,22 +549,19 @@ class NS_generator(RLModel):
                 dnn_layer = tf.contrib.layers.batch_norm(dnn_layer, is_training=self.is_train, scale=True)
         self.dnn_input = dnn_layer
         self.final_neurons = self.get_dnn(self.dnn_input, self.dnn_hidden_units, [tf.nn.relu, tf.nn.relu, tf.nn.relu],
-                                          "evaluator_dnn"),
+                                          "{}_dnn".format(self.evaluator_name)),
 
     def build_evaluator(self):
-        with tf.variable_scope("evaluator"):
-            self.all_feature_concatenation_evaluator = self.enc_input_evaluator
+        self.all_feature_concatenation_evaluator = self.enc_input_evaluator
 
-            self.sum_pooling_channel()
-            self.concatenation_channel()
-            self.multi_head_self_attention_channel()
-            self.rnn_channel()
-            self.pair_wise_comparison_channel()
+        self.sum_pooling_channel()
+        self.concatenation_channel()
+        self.multi_head_self_attention_channel()
+        self.rnn_channel()
+        self.pair_wise_comparison_channel()
 
-            self.dnn_layer()
-            self.logits_layer()
-            # 之后加载指定路径的evaluator参数
-            # self.load_evaluator_params(self.evaluator_path)
+        self.dnn_layer()
+        self.logits_layer()
 
     def load_evaluator_params(self, path):
         """
@@ -639,7 +634,7 @@ class NS_generator(RLModel):
             #         var.trainable = False
 
     def rnn_channel(self):
-        with tf.variable_scope(name_or_scope="{}_RNN_Channel".format(self.evaluator_name)):
+        with tf.variable_scope(name_or_scope="{}_RNN_Channel".format(self.evaluator_name), reuse=tf.AUTO_REUSE):
             # one can reverse self.all_feature_concatenation_evaluator and make it a Bi-GRU
             encoder_cell = tf.nn.rnn_cell.GRUCell(64)
             rnn_inputs = tf.transpose(self.all_feature_concatenation_evaluator, perm=[1, 0, 2])  # [N,B,E]
@@ -649,48 +644,38 @@ class NS_generator(RLModel):
             output = [tf.reshape(output, [-1, 1, encoder_cell.output_size]) for output in outputs]
             output = tf.concat(axis=1, values=output)
             self.rnn_layer = tf.reduce_sum(output, axis=1)
-            # 冻结此层的变量
-            # for var in tf.trainable_variables():
-            #     if "rnn_channel" in var.name:
-            #         var.trainable = False
 
     def pair_wise_comparison_channel(self):
         with tf.variable_scope(name_or_scope="{}_Pair_Wise_Comparison_Channel".format(self.evaluator_name)):
             input_transposed = tf.transpose(self.all_feature_concatenation_evaluator, perm=[0, 2, 1])
             output = tf.matmul(self.all_feature_concatenation_evaluator, input_transposed)
             self.pair_wise_comparison_layer = tf.reshape(output, [-1, self.pv_size * self.pv_size])
-            # 冻结此层的变量
-            # for var in tf.trainable_variables():
-            #     if "pair_wise_comparison_channel" in var.name:
-            #         var.trainable = False
 
-    def get_dnn(self, x, layer_nums, layer_acts, name="NS_evaluator_dnn"):
+    def get_dnn(self, x, layer_nums, layer_acts, name):
         input_ft = x
         assert len(layer_nums) == len(layer_acts)
-        with tf.variable_scope(name):
+        with tf.variable_scope(name, reuse=tf.AUTO_REUSE):
             for i, layer_num in enumerate(layer_nums):
                 input_ft = tf.contrib.layers.fully_connected(
                     inputs=input_ft,
                     num_outputs=layer_num,
                     scope='layer_%d' % i,
-                    activation_fn=layer_acts[i],
-                    reuse=tf.AUTO_REUSE,
-                    trainable=False)
+                    activation_fn=layer_acts[i])
         return input_ft
 
-    def logits_layer(self, name="NS_evaluator_logits_layer"):
+    def logits_layer(self):
         # with tf.variable_scope(name_or_scope="{}_Logits".format(self.name)) as dnn_logits_scope:
         #     logits = layers.linear(self.final_neurons, 1, scope=dnn_logits_scope)
-        with tf.variable_scope(name):
+        with tf.variable_scope('{}_logits_layer'.format(self.evaluator_name), reuse=tf.AUTO_REUSE):
             if self.score_format == 'pv':
-                logits = layers.linear(self.final_neurons, 1, trainable=False)
+                logits = layers.linear(self.final_neurons, 1)
                 self.logits_pv_before_sigmoid = tf.reshape(logits, [-1, 1])
                 logits = tf.sigmoid(logits)
                 predictions = tf.reshape(logits, [-1, 1])  # [B,1]
                 self.logits_pv = predictions
                 self.logits = tf.tile(self.logits_pv, [1, self.max_time_len])
             elif self.score_format == 'iv':
-                logits = layers.linear(self.final_neurons, self.max_time_len, trainable=False)
+                logits = layers.linear(self.final_neurons, self.max_time_len)
                 logits = tf.reshape(logits, [-1, self.max_time_len])
                 logits = tf.nn.softmax(logits)
                 seq_mask = tf.sequence_mask(self.seq_length_ph, maxlen=self.max_time_len, dtype=tf.float32)
@@ -739,8 +724,8 @@ class NS_generator(RLModel):
         label_pv_ph = self.build_ndcg_reward(batch_data[4])
         label_pv_ph = np.array(label_pv_ph)[:, 0]
         with self.graph.as_default():
-            pred, loss, logit, weight = self.sess.run(
-                [self.logits, self.evaluator_loss, self.logits_pv, self.loss_weight], feed_dict={
+            pred, loss = self.sess.run(
+                [self.logits, self.evaluator_loss], feed_dict = {
                     self.usr_profile: np.reshape(np.array(batch_data[1]), [-1, self.profile_num]),
                     self.itm_spar_ph: batch_data[2],
                     self.itm_dens_ph: batch_data[3],
