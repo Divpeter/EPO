@@ -35,6 +35,7 @@ class BaseModel(object):
                 self.seq_length_ph = tf.placeholder(tf.int32, [None, ], name='seq_length_ph')
                 # self.hist_length_ph = tf.placeholder(tf.int32, [None, ], name='hist_length_ph')
                 self.label_ph = tf.placeholder(tf.float32, [None, max_time_len], name='label_ph')
+                self.label_pv_ph = tf.placeholder(tf.float32, [None, 1], name='label_ph')
                 # self.time_ph = tf.placeholder(tf.float32, [None, max_seq_len], name='time_ph')
                 self.is_train = tf.placeholder(tf.bool, [], name='is_train')
                 self.cate_id = tf.placeholder(tf.int32, [None, max_time_len], name='cate_id')

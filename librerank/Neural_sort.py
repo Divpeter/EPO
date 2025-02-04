@@ -291,7 +291,8 @@ class NS_generator(RLModel):
                 attention_weights = tf.where(self.training_sampled_symbol > 0, self.neg_inf, attention_weights)  # [B,N]
             attention_weights = tf.nn.softmax(attention_weights)
 
-            attention_weights = tf.log(attention_weights + 1e-10) + gumbel_sampling(tf.shape(attention_weights), self.beta)    # [B,M]
+            attention_weights = tf.log(attention_weights + 1e-10) + gumbel_sampling(tf.shape(attention_weights),
+                                                                                    self.beta)  # [B,M]
 
             if self.training_sample_manner == "greedy":
                 # 1、greedy
@@ -395,7 +396,7 @@ class NS_generator(RLModel):
             self.rnn_layer = None
             self.pair_wise_comparison_layer = None
             self.evaluator_name = 'NS_evaluator'
-            self.label_type = 'zero_one'
+            self.label_type = 'ndcg'
             self.feature_batch_norm = True
             self.N = self.item_size = self.pv_size = self.max_time_len
             self.use_BN = True
@@ -499,6 +500,8 @@ class NS_generator(RLModel):
                 loss_weight = tf.ones([self.batch_size, 1])  # [B,1]
                 if self.label_type == "total_num":  # label_ph: [B, N(0 or 1)]
                     loss_weight = tf.reduce_sum(self.label_ph, axis=1)
+                if self.label_type == "ndcg":  # label_ph: [B, N(0 or 1)]
+                    loss_weight = self.label_pv_ph
                     # loss_weight = tf.where(loss_weight > 1, loss_weight, tf.ones_like(loss_weight))  # [B,1]
                 one = tf.ones_like(loss_weight, dtype=tf.float32)
                 zero = tf.zeros_like(loss_weight, dtype=tf.float32)
@@ -710,12 +713,15 @@ class NS_generator(RLModel):
             return ctr_probs
 
     def train_evaluator(self, batch_data, lr, reg_lambda, keep_prob=0.8, train_prefer=1):
+        label_pv_ph = self.build_ndcg_reward(batch_data[4])
+        label_pv_ph = np.array(label_pv_ph)[:, 0]
         with self.graph.as_default():
             loss, _ = self.sess.run([self.evaluator_loss, self.evaluator_train_step], feed_dict={
                 self.usr_profile: np.reshape(np.array(batch_data[1]), [-1, self.profile_num]),
                 self.itm_spar_ph: batch_data[2],
                 self.itm_dens_ph: batch_data[3],
                 self.label_ph: batch_data[4],
+                self.label_pv_ph: np.reshape(label_pv_ph, [-1, 1]),
                 self.seq_length_ph: batch_data[6],
                 self.lr: lr,
                 self.reg_lambda: reg_lambda,
@@ -730,20 +736,24 @@ class NS_generator(RLModel):
             return loss
 
     def eval_evaluator(self, batch_data, reg_lambda, eval_prefer=1, keep_prob=1, no_print=True):
+        label_pv_ph = self.build_ndcg_reward(batch_data[4])
+        label_pv_ph = np.array(label_pv_ph)[:, 0]
         with self.graph.as_default():
-            pred, loss, logit, weight = self.sess.run([self.logits, self.evaluator_loss, self.logits_pv, self.loss_weight], feed_dict={
-                self.usr_profile: np.reshape(np.array(batch_data[1]), [-1, self.profile_num]),
-                self.itm_spar_ph: batch_data[2],
-                self.itm_dens_ph: batch_data[3],
-                self.label_ph: batch_data[4],
-                self.seq_length_ph: batch_data[6],
-                self.reg_lambda: reg_lambda,
-                self.keep_prob: keep_prob,
-                self.is_train: False,
-                self.only_evaluator: True,
-                self.feed_train_order: False,
-                self.train_order: np.zeros_like(batch_data[4]),
-                self.controllable_auc_prefer: eval_prefer,
-                self.controllable_prefer_vector: [[eval_prefer, 1 - eval_prefer]],
-            })
+            pred, loss, logit, weight = self.sess.run(
+                [self.logits, self.evaluator_loss, self.logits_pv, self.loss_weight], feed_dict={
+                    self.usr_profile: np.reshape(np.array(batch_data[1]), [-1, self.profile_num]),
+                    self.itm_spar_ph: batch_data[2],
+                    self.itm_dens_ph: batch_data[3],
+                    self.label_ph: batch_data[4],
+                    self.label_pv_ph: np.reshape(label_pv_ph, [-1, 1]),
+                    self.seq_length_ph: batch_data[6],
+                    self.reg_lambda: reg_lambda,
+                    self.keep_prob: keep_prob,
+                    self.is_train: False,
+                    self.only_evaluator: True,
+                    self.feed_train_order: False,
+                    self.train_order: np.zeros_like(batch_data[4]),
+                    self.controllable_auc_prefer: eval_prefer,
+                    self.controllable_prefer_vector: [[eval_prefer, 1 - eval_prefer]],
+                })
             return pred.tolist(), loss
