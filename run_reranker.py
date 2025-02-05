@@ -225,6 +225,21 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
             evaluator.set_sess(sess)
             sess.run(tf.global_variables_initializer())
             evaluator.load(params.evaluator_path)
+    elif params.model_type == 'EGR_PRM_generator':
+        model = PPOModel(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum, itm_dens_fnum,
+                         profile_num, max_norm=params.max_norm, rep_num=params.rep_num, acc_prefer=params.acc_prefer,
+                         is_controllable=params.controllable)
+        # discriminator = EGR_discriminator(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum, itm_dens_fnum,
+        #              profile_num, max_norm=params.max_norm)
+        evaluator = NS_generator(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
+                             itm_dens_fnum, profile_num, max_norm=params.max_norm, rep_num=params.rep_num,
+                             acc_prefer=params.acc_prefer, is_controllable=params.controllable, model_name=params.model_type)
+        with evaluator.graph.as_default() as g:
+            sess = tf.Session(graph=g, config=tf.ConfigProto(gpu_options=gpu_options))
+            evaluator.set_sess(sess)
+            sess.run(tf.global_variables_initializer())
+            evaluator.load(params.evaluator_path)
+            print(f"evluator loaded from : {params.evaluator_path}")
         # [1,1,1,0,0,0]
         # [1,2,3,0,0,0,0,0,0]
         # [1,0,0,2,0,0,0,3,0]
@@ -384,7 +399,7 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
             elif params.model_type == 'NS_evaluator':
                 vali_loss, res = eval_ns(model, test_file, params.l2_reg, params.batch_size, False,
                                          params.metric_scope, False)
-            elif params.model_type == 'CMR_PRM_generator':
+            elif params.model_type == 'CMR_PRM_generator' or params.model_type == 'EGR_PRM_generator':
                 vali_loss, res = eval(model, test_file, params.l2_reg, params.batch_size, False,
                                       params.metric_scope, True, with_evaluator=params.with_evaluator_metrics, evaluator=
                                       evaluator if params.with_evaluator_metrics else None)
@@ -484,7 +499,24 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
 
                 act_idx_out, act_probs_one, rl_sp_outputs, rl_de_outputs, mask_arr, lp_sp_data, lp_de_data, _, enc_input, \
                 cate_chosen, cate_seq = model.predict(data_batch, train_prefer, params.l2_reg)
-                auc_rewards = evaluator.predict(rl_sp_outputs, rl_de_outputs, data_batch[6])
+                auc_rewards = evaluator.predict(rl_sp_outputs, rl_de_outputs, data_batch[6]) # [16,10]               
+                _, div_rewards = model.build_erria_reward(cate_chosen, cate_seq)
+                loss, mean_return, auc_loss, div_loss = model.train(data_batch, rl_sp_outputs, rl_de_outputs,
+                                                                    act_probs_one, act_idx_out,
+                                                                    auc_rewards, div_rewards, mask_arr,
+                                                                    params.c_entropy, params.lr,
+                                                                    params.l2_reg,
+                                                                    params.keep_prob, train_prefer=train_prefer)
+                auc_train_losses_step.append(auc_loss)
+                div_train_losses_step.append(div_loss)
+            elif  params.model_type == 'EGR_PRM_generator':
+                data_batch = repeat_data(data_batch, params.rep_num)
+
+                act_idx_out, act_probs_one, rl_sp_outputs, rl_de_outputs, mask_arr, lp_sp_data, lp_de_data, _, enc_input, \
+                cate_chosen, cate_seq = model.predict(data_batch, train_prefer, params.l2_reg)
+                auc_rewards = evaluator.predict_evaluator(np.array(data_batch[1]), rl_sp_outputs, rl_de_outputs,
+                                                        # [16,10]
+                                                        data_batch[6], data_batch)
                 _, div_rewards = model.build_erria_reward(cate_chosen, cate_seq)
                 loss, mean_return, auc_loss, div_loss = model.train(data_batch, rl_sp_outputs, rl_de_outputs,
                                                                     act_probs_one, act_idx_out,
@@ -648,7 +680,7 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
                     elif params.model_type == 'NS_evaluator':
                         vali_loss, res = eval_ns(model, test_file, params.l2_reg, params.batch_size, True,
                                                  params.metric_scope, False)
-                    elif params.model_type == 'CMR_PRM_generator':
+                    elif params.model_type == 'CMR_PRM_generator' or params.model_type == 'EGR_PRM_generator' :
                         vali_loss, res = eval(model, test_file, params.l2_reg, params.batch_size, True,
                                               params.metric_scope, True, with_evaluator=params.with_evaluator_metrics,
                                               evaluator=evaluator if params.with_evaluator_metrics else None)
@@ -769,10 +801,10 @@ def reranker_parse_args():
     parser.add_argument('--max_time_len', default=10, type=int, help='max time length')
     parser.add_argument('--save_dir', type=str, default='./', help='dir that saves logs and model')
     parser.add_argument('--data_dir', type=str, default='./data/ad/', help='data dir')
-    parser.add_argument('--model_type', default='CMR_PRM_generator',
+    parser.add_argument('--model_type', default='EGR_PRM_generator',
                         choices=['PRM', 'DLCM', 'SetRank', 'GSF', 'miDNN', 'Seq2Slate', 'EGR_evaluator',
                                  'EGR_generator', 'CMR_generator', 'CMR_evaluator', 'LAST_generator',
-                                 'LAST_evaluator', 'NS_generator', 'NS_evaluator', 'CMR_PRM_generator'],
+                                 'LAST_evaluator', 'NS_generator', 'NS_evaluator', 'CMR_PRM_generator', 'EGR_RPM_generator'],
                         type=str,
                         help='algorithm name, including PRM, DLCM, SetRank, GSF, miDNN, Seq2Slate, EGR_evaluator, EGR_generator')
     parser.add_argument('--data_set_name', default='ad', type=str, help='name of dataset, including ad and prm')
@@ -797,7 +829,7 @@ def reranker_parse_args():
     parser.add_argument('--evaluator_path', type=str, default='', help='evaluator ckpt dir')
     parser.add_argument('--reload_path', type=str, default='', help='model ckpt dir')
     # parser.add_argument('--setting_path', type=str, default='./config/prm_setting.json', help='setting dir')
-    parser.add_argument('--setting_path', type=str, default='./example/config/ad/cmr_prm_generator_setting.json',
+    parser.add_argument('--setting_path', type=str, default='./example/config/ad/egr_prm_generator_setting.json',
                         help='setting dir')
     parser.add_argument('--controllable', type=bool, default=False, help='is controllable')
     parser.add_argument('--auc_rewards_type', type=str, default='iv', help='auc rewards type')
