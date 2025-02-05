@@ -1,8 +1,8 @@
 {
-  "model_type": "NS_generator",
+  "model_type": "CMR_PRM_generator",
   "data_set_name": "ad",
   "initial_ranker": "lambdaMART",
-  "lr": 1e-3,
+  "lr": 1e-4,
   "l2_reg": 1e-4,
   "batch_size": 512,
   "max_time_len": 10,
@@ -18,5 +18,5 @@
   "auc_rewards_type": "iv",
   "div_rewards_type": "iv",
   "acc_prefer": 0.2,
-  "evaluator_type": "cmr"
+  "evaluator_type": "cmr_prm"
 }

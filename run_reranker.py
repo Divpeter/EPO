@@ -16,7 +16,7 @@ from librerank.Neural_sort import *
 import datetime
 
 
-def eval(model, data, l2_reg, batch_size, isrank, metric_scope, _print=False,
+def eval(model, data, l2_reg, batch_size, isrank, metric_scope, is_prm, _print=False,
          with_evaluator=False, evaluator=None):
     preds = []
     # labels = []
@@ -37,7 +37,10 @@ def eval(model, data, l2_reg, batch_size, isrank, metric_scope, _print=False,
         losses.append(loss)
         if with_evaluator:
             order = [sorted(range(len(_pred)), key=lambda k: _pred[k], reverse=True) for _pred in pred]
-            batch_sum, batch_ave = evaluator_metrics(data_batch, order, metric_scope, model, evaluator)
+            if is_prm:
+                batch_sum, batch_ave = evaluator_metrics_ns(data_batch, order, metric_scope, evaluator)
+            else:
+                batch_sum, batch_ave = evaluator_metrics(data_batch, order, metric_scope, model, evaluator)
             for i in range(len(metric_scope)):
                 evaluator_sum[i].extend(batch_sum[i])
                 evaluator_ave[i].extend(batch_ave[i])
@@ -236,7 +239,7 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
         model = SLModel(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum, itm_dens_fnum,
                         profile_num, max_norm=params.max_norm, acc_prefer=params.acc_prefer,
                         is_controllable=params.controllable)
-    elif params.model_type == 'CMR_generator':
+    elif params.model_type == 'CMR_generator' or  params.model_type == 'CMR_PRM_generator':
         model = CMR_generator(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
                               itm_dens_fnum,
                               profile_num, max_norm=params.max_norm, rep_num=params.rep_num,
@@ -255,11 +258,17 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
             evaluator = LAST_evaluator(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
                                        itm_dens_fnum,
                                        profile_num, max_norm=params.max_norm)
+        elif params.evaluator_type == 'cmr_prm':
+            evaluator = NS_generator(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
+                             itm_dens_fnum, profile_num, max_norm=params.max_norm, rep_num=params.rep_num,
+                             acc_prefer=params.acc_prefer, is_controllable=params.controllable, model_name=params.model_type)
+            
         with evaluator.graph.as_default() as g:
             sess = tf.Session(graph=g, config=tf.ConfigProto(gpu_options=gpu_options))
             evaluator.set_sess(sess)
             sess.run(tf.global_variables_initializer())
             evaluator.load(params.evaluator_path)
+            print(f"evaluator loaded from: {params.evaluator_path}")
     elif params.model_type == 'NS_generator' or params.model_type == 'NS_evaluator':
         params.acc_prefer = 1.0
         model = NS_generator(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
@@ -375,9 +384,13 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
             elif params.model_type == 'NS_evaluator':
                 vali_loss, res = eval_ns(model, test_file, params.l2_reg, params.batch_size, False,
                                          params.metric_scope, False)
+            elif params.model_type == 'CMR_PRM_generator':
+                vali_loss, res = eval(model, test_file, params.l2_reg, params.batch_size, False,
+                                      params.metric_scope, True, with_evaluator=params.with_evaluator_metrics, evaluator=
+                                      evaluator if params.with_evaluator_metrics else None)
             else:
                 vali_loss, res = eval(model, test_file, params.l2_reg, params.batch_size, False,
-                                      params.metric_scope, with_evaluator=params.with_evaluator_metrics, evaluator=
+                                      params.metric_scope, False, with_evaluator=params.with_evaluator_metrics, evaluator=
                                       evaluator if params.with_evaluator_metrics else None)
             training_monitor['train_loss'].append(None)
             training_monitor['vali_loss'].append(None)
@@ -512,7 +525,7 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
                 loss = model.train(data_batch, training_prediction_order, auc_rewards, div_rewards, params.lr,
                                    params.l2_reg,
                                    params.keep_prob)
-            elif params.model_type == 'CMR_generator':
+            elif params.model_type == 'CMR_generator' or params.model_type == 'CMR_PRM_generator'  :
                 # 这里生成的cate_chosen也是传递序列的关键数据
                 training_attention_distribution, training_prediction_order, predictions, cate_seq, cate_chosen = \
                     model.rerank(data_batch, params.keep_prob, train_prefer=train_prefer)
@@ -521,17 +534,22 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
                     rl_sp_outputs, rl_de_outputs = model.build_ft_chosen(data_batch,
                                                                          training_prediction_order)  # [16,10,5],data_size:16
                     rerank_click = np.array(model.build_label_reward(data_batch[4], training_prediction_order))
-                    if params.evaluator_type == 'cmr' or params.evaluator_type == 'last':
+                    if params.evaluator_type == 'cmr' or params.evaluator_type == 'last' :
                         auc_rewards = evaluator.predict(np.array(data_batch[1]), rl_sp_outputs, rl_de_outputs,
                                                         # [16,10]
                                                         data_batch[6])
                         base_auc_rewards = evaluator.predict(np.array(data_batch[1]), np.array(data_batch[2]),
                                                              np.array(data_batch[3]), data_batch[6])
+                    elif params.evaluator_type == 'cmr_prm':
+                        auc_rewards = evaluator.predict_evaluator(np.array(data_batch[1]), rl_sp_outputs, rl_de_outputs,
+                                                        # [16,10]
+                                                        data_batch[6], data_batch)
+                        base_auc_rewards = evaluator.predict_evaluator(np.array(data_batch[1]), np.array(data_batch[2]),
+                                                             np.array(data_batch[3]), data_batch[6], data_batch)
                     elif params.evaluator_type == 'egr':
                         auc_rewards = evaluator.predict(rl_sp_outputs, rl_de_outputs, data_batch[6])
                         base_auc_rewards = evaluator.predict(np.array(data_batch[2]), np.array(data_batch[3]),
                                                              data_batch[6])
-
                     # base_auc_rewards = np.mean(base_auc_rewards, axis=1)
                     # base_auc_rewards = np.array(create_ave_reward(base_auc_rewards, data_batch[6]))
                     auc_rewards -= base_auc_rewards
@@ -630,9 +648,13 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
                     elif params.model_type == 'NS_evaluator':
                         vali_loss, res = eval_ns(model, test_file, params.l2_reg, params.batch_size, True,
                                                  params.metric_scope, False)
+                    elif params.model_type == 'CMR_PRM_generator':
+                        vali_loss, res = eval(model, test_file, params.l2_reg, params.batch_size, True,
+                                              params.metric_scope, True, with_evaluator=params.with_evaluator_metrics,
+                                              evaluator=evaluator if params.with_evaluator_metrics else None)
                     else:
                         vali_loss, res = eval(model, test_file, params.l2_reg, params.batch_size, True,
-                                              params.metric_scope, with_evaluator=params.with_evaluator_metrics,
+                                              params.metric_scope, False, with_evaluator=params.with_evaluator_metrics,
                                               evaluator=evaluator if params.with_evaluator_metrics else None)
                     training_monitor['train_loss'].append(train_loss)
                     training_monitor['train_prefer'].append(params.acc_prefer)
@@ -747,10 +769,10 @@ def reranker_parse_args():
     parser.add_argument('--max_time_len', default=10, type=int, help='max time length')
     parser.add_argument('--save_dir', type=str, default='./', help='dir that saves logs and model')
     parser.add_argument('--data_dir', type=str, default='./data/ad/', help='data dir')
-    parser.add_argument('--model_type', default='NS_generator',
+    parser.add_argument('--model_type', default='CMR_PRM_generator',
                         choices=['PRM', 'DLCM', 'SetRank', 'GSF', 'miDNN', 'Seq2Slate', 'EGR_evaluator',
                                  'EGR_generator', 'CMR_generator', 'CMR_evaluator', 'LAST_generator',
-                                 'LAST_evaluator', 'NS_generator', 'NS_evaluator'],
+                                 'LAST_evaluator', 'NS_generator', 'NS_evaluator', 'CMR_PRM_generator'],
                         type=str,
                         help='algorithm name, including PRM, DLCM, SetRank, GSF, miDNN, Seq2Slate, EGR_evaluator, EGR_generator')
     parser.add_argument('--data_set_name', default='ad', type=str, help='name of dataset, including ad and prm')
@@ -775,7 +797,7 @@ def reranker_parse_args():
     parser.add_argument('--evaluator_path', type=str, default='', help='evaluator ckpt dir')
     parser.add_argument('--reload_path', type=str, default='', help='model ckpt dir')
     # parser.add_argument('--setting_path', type=str, default='./config/prm_setting.json', help='setting dir')
-    parser.add_argument('--setting_path', type=str, default='./example/config/ad/ns_generator_setting.json',
+    parser.add_argument('--setting_path', type=str, default='./example/config/ad/cmr_prm_generator_setting.json',
                         help='setting dir')
     parser.add_argument('--controllable', type=bool, default=False, help='is controllable')
     parser.add_argument('--auc_rewards_type', type=str, default='iv', help='auc rewards type')
