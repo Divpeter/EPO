@@ -148,9 +148,9 @@ class LAST_generator(CMR_generator):
         #step_sizes = [8] * simple_sampling_number + step_sizes
         self.step_sizes = step_sizes
         for sample_manner in sample_manner_list:
-            for step_size in step_sizes:
+            for idx, step_size in enumerate(step_sizes):
                 self.sample_manner = sample_manner
-                if step_size == 0:
+                if idx == 0:
                     self.sample_manner = "greedy"
                 sampling_function = self.get_sampling_function()  # have global state inside, need to be init everytime when used.
                 # if step_size==0.0:
