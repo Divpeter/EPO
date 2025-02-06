@@ -52,18 +52,23 @@ class LAST_generator(CMR_generator):
 
         self.feature_augmentation()
 
-        self.deep_set_encode()
+        with tf.variable_scope("encoder"):
+            self.deep_set_encode()
 
-        self.decoder_cell = tf.nn.rnn_cell.GRUCell(self.lstm_hidden_units)
+        with tf.variable_scope("encoder_state"):
+            # self.decoder_cell = tf.nn.rnn_cell.BasicLSTMCell(self.lstm_hidden_units)
+            self.decoder_cell = tf.nn.rnn_cell.GRUCell(self.lstm_hidden_units)
 
-        self.rnn_decode()
+        with tf.variable_scope("decoder"):
+            self.rnn_decode()
 
         self.save_important_variables()
 
         with tf.variable_scope("loss"):
             self._build_loss()
 
-        self.add_instant_learning_channels()
+        with tf.variable_scope("decoder"):
+            self.add_instant_learning_channels()
 
     def save_important_variables(self):
         self.decoder_inputs_record = self.decoder_inputs
@@ -137,12 +142,7 @@ class LAST_generator(CMR_generator):
         #sample_manner_list = ["greedy"]
         #step_sizes = [12]
         
-        num = 5
-        low = 6
-        high = 10
-        inter = (high-low)/(num-1)
-
-        step_sizes = list(np.arange(low, high, inter))
+        step_sizes = list(np.arange(-5, 6, 1))
         simple_sampling_number = len(step_sizes)
         step_sizes = [0] * simple_sampling_number + step_sizes
         #step_sizes = [8] * simple_sampling_number + step_sizes
@@ -150,6 +150,8 @@ class LAST_generator(CMR_generator):
         for sample_manner in sample_manner_list:
             for step_size in step_sizes:
                 self.sample_manner = sample_manner
+                if step_size == 0:
+                    self.sample_manner = "greedy"
                 sampling_function = self.get_sampling_function()  # have global state inside, need to be init everytime when used.
                 # if step_size==0.0:
                 #     self.print_loss2 = tf.print("i",step_size,
