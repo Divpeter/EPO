@@ -10,6 +10,7 @@ from librerank.CMR_generator import *
 from librerank.rl_reranker import *
 from librerank.LAST_generator import *
 from librerank.LAST_evaluator import *
+from librerank.Neural_sort import *
 import datetime
 from run_reranker import eval
 import matplotlib.pyplot as plt
@@ -40,9 +41,9 @@ def eval_last(model, data, batch_size, isrank, metric_scope, _print=False, evalu
         #auc_rewards = np.array(model.build_ndcg_reward(labels))
         #base_auc_rewards = np.array(model.build_ndcg_reward(data_batch[4]))
         #auc_rewards -= base_auc_rewards
-        auc_rewards = evaluator.predict(np.array(data_batch[1]), rl_sp_outputs, rl_de_outputs, data_batch[6])
-        base_auc_rewards = evaluator.predict(np.array(data_batch[1]), np.array(data_batch[2]), np.array(data_batch[3]),
-                                             data_batch[6])
+        auc_rewards = evaluator.predict_evaluator(np.array(data_batch[1]), rl_sp_outputs, rl_de_outputs, data_batch[6], data_batch)
+        base_auc_rewards = evaluator.predict_evaluator(np.array(data_batch[1]), np.array(data_batch[2]), np.array(data_batch[3]),
+                                             data_batch[6], data_batch)
         auc_rewards -= base_auc_rewards
 
         # _, base_div_rewards = model.build_erria_reward(cate_seq, cate_seq)  # rank base rerank new
@@ -54,12 +55,11 @@ def eval_last(model, data, batch_size, isrank, metric_scope, _print=False, evalu
         pred, order = model.instant_learning(data_batch, auc_rewards, div_rewards, inference_order)  # pred: [L, B, N]
         batch_ave_steps = []  # [L, scope_num, B]
         for i in range(step_sizes):
-            batch_sum, batch_ave = evaluator_metrics(data_batch, order[i], metric_scope, model,
-                                                     evaluator)  # [scope_num, B]
+            batch_sum, batch_ave = evaluator_metrics_ns(data_batch, order[i], metric_scope, evaluator)  # [scope_num, B]
             res = list(evaluate_multi(data_batch[4], pred[i], list(map(lambda a: [i[1] for i in a], data_batch[2])), metric_scope, isrank, _print))  # [3+2, scope_num, ]
             div_metrics = res[-1][-1]
             ndcg_metrics = res[1][-1]
-            batch_ave = np.array(batch_ave)*0+np.array(ndcg_metrics)*1
+            batch_ave = np.array(batch_ave)*1+np.array(ndcg_metrics)*0
             batch_ave_steps.append(batch_ave)
             #batch_ave_steps.append(ndcg_metrics)
         batch_ave_steps_cmr = np.array(batch_ave_steps[:step_sizes // 2])
@@ -128,20 +128,15 @@ def reranker_parse_args():
     parser.add_argument('--timestamp', type=str, default=datetime.datetime.now().strftime("%Y%m%d%H%M"))
     parser.add_argument('--evaluator_path', type=str, default='', help='evaluator ckpt dir')
     parser.add_argument('--reload_path', type=str,
-                        #default='./model//save_model_ad/10/202402231212_lambdaMART_LAST_generator_16_0.0001_0.0001_64_16_0.8_1.0',
-                        #default='./model//save_model_ad/10/202402221850_lambdaMART_LAST_generator_16_0.0001_0.0001_64_16_0.8_1.0',
-                        default='./model//save_model_ad/10/202402231212_lambdaMART_LAST_generator_16_0.0001_0.0001_64_16_0.8_1.0',
-                        #default='./model//save_model_ad/10/202403042015_lambdaMART_LAST_generator_16_0.0001_0.0001_64_16_0.8_1.0',
-                        #default='./model//save_model_ad/10/202403042016_lambdaMART_LAST_generator_16_0.0001_0.0001_64_16_0.8_1.0',
-                        #default='./model//save_model_ad/10/202403050827_lambdaMART_LAST_generator_16_0.0001_0.0001_64_16_0.8_1.0',
-                        #default='./model//save_model_ad/10/202403050828_lambdaMART_LAST_generator_16_0.0001_0.0001_64_16_0.8_1.0',
+                        default='./model//save_model_ad/10/202502061048_lambdaMART_CMR_PRM_generator_512_0.0001_0.0001_64_16_0.8_1',
                         help='model ckpt dir')
     parser.add_argument('--setting_path', type=str, default='./example/config/ad/last_generator_setting.json',
                         help='setting dir')
     parser.add_argument('--controllable', type=bool, default=False, help='is controllable')
     parser.add_argument('--evaluator_metrics_path', type=str,
-                        default="./model//save_model_ad/10/202303091111_lambdaMART_LAST_evaluator_16_0.0005_0.0002_64_16_0.8_1.0",
-                        help='evaluator model')
+                        # default="./model//save_model_ad/10/202303091111_lambdaMART_LAST_evaluator_16_0.0005_0.0002_64_16_0.8_1.0",
+                        default="./model//save_model_ad/10/202502050036_lambdaMART_NS_evaluator_512_0.001_0.0002_64_16_0.8_1.0",
+    help='evaluator model')
     parser.add_argument('--with_evaluator_metrics', type=bool, default=True, help='with_evaluator_metrics')
     FLAGS, _ = parser.parse_known_args()
     return FLAGS
@@ -223,9 +218,10 @@ if __name__ == '__main__':
         sess.run(tf.global_variables_initializer())
         model.load(params.reload_path)
 
-    evaluator = LAST_evaluator(num_ft, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
-                               itm_dens_fnum,
-                               profile_fnum, max_norm=params.max_norm)
+    evaluator = NS_generator(num_ft, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
+                         itm_dens_fnum, profile_fnum, max_norm=params.max_norm, rep_num=params.rep_num,
+                         acc_prefer=params.acc_prefer, is_controllable=params.controllable,
+                         model_name=params.model_type)
     with evaluator.graph.as_default() as g:
         sess = tf.Session(graph=g, config=tf.ConfigProto(gpu_options=gpu_options))
         evaluator.set_sess(sess)
