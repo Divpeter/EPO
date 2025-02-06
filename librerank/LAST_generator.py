@@ -1,6 +1,7 @@
 from librerank.CMR_generator import *
 from librerank.CMR_evaluator import *
 
+
 class LAST_generator(CMR_generator):
 
     def _build_graph(self):
@@ -139,19 +140,19 @@ class LAST_generator(CMR_generator):
 
         # extra predictions
         sample_manner_list = ["Thompson_sampling"]
-        #sample_manner_list = ["greedy"]
-        #step_sizes = [12]
-        
+        # sample_manner_list = ["greedy"]
+        # step_sizes = [12]
+
         step_sizes = list(np.arange(-5, 6, 1))
         simple_sampling_number = len(step_sizes)
         step_sizes = [0] * simple_sampling_number + step_sizes
-        #step_sizes = [8] * simple_sampling_number + step_sizes
+        # step_sizes = [8] * simple_sampling_number + step_sizes
         self.step_sizes = step_sizes
+        self.sample_manner = "greedy"
         for sample_manner in sample_manner_list:
             for idx, step_size in enumerate(step_sizes):
-                self.sample_manner = sample_manner
-                if idx == 0:
-                    self.sample_manner = "greedy"
+                if idx == 1:
+                    self.sample_manner = sample_manner
                 sampling_function = self.get_sampling_function()  # have global state inside, need to be init everytime when used.
                 # if step_size==0.0:
                 #     self.print_loss2 = tf.print("i",step_size,
@@ -175,39 +176,40 @@ class LAST_generator(CMR_generator):
 
     def inference(self, batch_data):
         with self.graph.as_default():
-            inference_order, inference_predict, cate_seq, cate_chosen = self.sess.run([self.inference_prediction_order_record, self.predictions, self.cate_seq, self.cate_chosen],
-                                           feed_dict={
-                                               self.usr_profile: np.reshape(np.array(batch_data[1]),
-                                                                            [-1, self.profile_num]),
-                                               self.itm_spar_ph: batch_data[2],
-                                               self.itm_dens_ph: batch_data[3],
-                                               self.seq_length_ph: batch_data[6],
-                                               self.train_order: np.zeros_like(batch_data[4]),
-                                               self.feed_inference_order: False,
-                                               self.feed_train_order: False,
-                                               self.is_train: False,
-                                               self.sample_phase: False,
-                                               self.keep_prob: 1})
+            inference_order, inference_predict, cate_seq, cate_chosen = self.sess.run(
+                [self.inference_prediction_order_record, self.predictions, self.cate_seq, self.cate_chosen],
+                feed_dict={
+                    self.usr_profile: np.reshape(np.array(batch_data[1]),
+                                                 [-1, self.profile_num]),
+                    self.itm_spar_ph: batch_data[2],
+                    self.itm_dens_ph: batch_data[3],
+                    self.seq_length_ph: batch_data[6],
+                    self.train_order: np.zeros_like(batch_data[4]),
+                    self.feed_inference_order: False,
+                    self.feed_train_order: False,
+                    self.is_train: False,
+                    self.sample_phase: False,
+                    self.keep_prob: 1})
             return inference_order, inference_predict, 0, cate_seq, cate_chosen
 
     def instant_learning(self, batch_data, auc_rewards, div_rewards, inference_order):
         with self.graph.as_default():
             predictions, orders = self.sess.run([self.extra_predictions, self.extra_prediction_orders],
-                                           feed_dict={
-                                               self.usr_profile: np.reshape(np.array(batch_data[1]),
-                                                                            [-1, self.profile_num]),
-                                               self.itm_spar_ph: batch_data[2],
-                                               self.itm_dens_ph: batch_data[3],
-                                               self.seq_length_ph: batch_data[6],
-                                               self.auc_label: auc_rewards,
-                                               self.div_label: div_rewards,
-                                               self.feed_inference_order: True,
-                                               self.inference_order: inference_order,
-                                               self.feed_train_order: True,
-                                               self.train_order: inference_order,
-                                               self.is_train: False,
-                                               self.sample_phase: False,
-                                               self.keep_prob: 1})
+                                                feed_dict={
+                                                    self.usr_profile: np.reshape(np.array(batch_data[1]),
+                                                                                 [-1, self.profile_num]),
+                                                    self.itm_spar_ph: batch_data[2],
+                                                    self.itm_dens_ph: batch_data[3],
+                                                    self.seq_length_ph: batch_data[6],
+                                                    self.auc_label: auc_rewards,
+                                                    self.div_label: div_rewards,
+                                                    self.feed_inference_order: True,
+                                                    self.inference_order: inference_order,
+                                                    self.feed_train_order: True,
+                                                    self.train_order: inference_order,
+                                                    self.is_train: False,
+                                                    self.sample_phase: False,
+                                                    self.keep_prob: 1})
             return predictions, orders
 
     def train(self, batch_data, train_order, auc_rewards, div_rewards, lr, reg_lambda, keep_prop=0.8):
