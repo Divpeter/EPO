@@ -138,8 +138,8 @@ class LAST_generator(CMR_generator):
         # CMR, Seq, EGR, CMR+il, midnn, PRM; ndcg, map, avg(evaluator), sum(evaluator)
 
         # extra predictions
-        sample_manner_list = ["Thompson_sampling"]
-        #sample_manner_list = ["greedy"]
+        # sample_manner_list = ["Thompson_sampling"]
+        sample_manner_list = ["greedy"]
         #step_sizes = [12]
 
         step_sizes = list(np.arange(-3, 4, 1))
