@@ -212,8 +212,12 @@ class BaseModel(object):
             score = tf.nn.softmax(fc3)
             score = tf.reshape(score[:, :, 0], [-1, self.max_time_len])
             # output
-            seq_mask = tf.sequence_mask(self.seq_length_ph, maxlen=self.max_time_len, dtype=tf.float32)
-            y_pred = seq_mask * score
+            # seq_mask = tf.sequence_mask(self.seq_length_ph, maxlen=self.max_time_len, dtype=tf.float32)
+            # y_pred = seq_mask * score
+            seq_mask = (1 - tf.sequence_mask(self.seq_length_ph, maxlen=self.max_time_len, dtype=tf.float32)) * (
+                tf.float32.min)
+            score += seq_mask
+            y_pred = tf.nn.softmax(score)
         return y_pred
 
     def build_mlp_net(self, inp, layer=(500, 200, 80), scope='mlp'):
@@ -495,7 +499,11 @@ class GSF(BaseModel):
                 for i in range(group_size):
                     output_data_list[group[i]] += group_score_list[i]
             self.y_pred = tf.concat(output_data_list, axis=1)
-            self.y_pred = tf.nn.softmax(self.y_pred, axis=-1)
+            seq_mask = (1 - tf.sequence_mask(self.seq_length_ph, maxlen=self.max_time_len, dtype=tf.float32)) * (
+                tf.float32.min)
+            self.y_pred += seq_mask
+            self.y_pred = tf.nn.softmax(self.y_pred)
+            # self.y_pred = tf.nn.softmax(self.y_pred, axis=-1)
             self.build_norm_logloss(self.y_pred)
 
     def build_gsf_fc_function(self, inp, hidden_size, activation, scope="gsf_nn"):
@@ -596,10 +604,16 @@ class PRM(BaseModel):
         else:
             fc2 = self.build_hyper_mlp_net_scope(dp1, self.d_model, 1, "hyper_dnn_prm_2", activation=None)
             # fc2 = self.build_hyper_mlp_net(dp1, self.d_model, 1, activation=None)
-        score = tf.nn.softmax(tf.reshape(fc2, [-1, self.max_time_len]))
+        score = tf.reshape(fc2, [-1, self.max_time_len])
+        # score = tf.nn.softmax(score)
         # output
-        seq_mask = tf.sequence_mask(self.seq_length_ph, maxlen=self.max_time_len, dtype=tf.float32)
-        return seq_mask * score
+        # seq_mask = tf.sequence_mask(self.seq_length_ph, maxlen=self.max_time_len, dtype=tf.float32)
+        # return seq_mask * score
+        seq_mask = (1 - tf.sequence_mask(self.seq_length_ph, maxlen=self.max_time_len, dtype=tf.float32)) * (
+            tf.float32.min)
+        score += seq_mask
+        score = tf.nn.softmax(score)
+        return score
 
 
 class SetRank(BaseModel):
@@ -646,8 +660,12 @@ class DLCM(BaseModel):
         fc2 = tf.layers.dense(tf.multiply(bn2, seq_final_fc), 1, activation=None, name='fc2')
         score = tf.reshape(fc2, [-1, self.max_time_len])
         # sequence mask
-        seq_mask = tf.sequence_mask(self.seq_length_ph, maxlen=self.max_time_len, dtype=tf.float32)
-        score = score * seq_mask
+        seq_mask = (1 - tf.sequence_mask(self.seq_length_ph, maxlen=self.max_time_len, dtype=tf.float32)) * (
+            tf.float32.min)
+        score += seq_mask
+        score = tf.nn.softmax(score)
+        # seq_mask = tf.sequence_mask(self.seq_length_ph, maxlen=self.max_time_len, dtype=tf.float32)
+        # score = score * seq_mask
         score = score - tf.reduce_min(score, 1, keep_dims=True)
         return score
 
