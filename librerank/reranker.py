@@ -88,12 +88,17 @@ class BaseModel(object):
             dp1 = tf.nn.dropout(fc1, self.keep_prob, name='dp1')
             fc2 = tf.layers.dense(dp1, 80, activation=tf.nn.relu, name='fc2')
             dp2 = tf.nn.dropout(fc2, self.keep_prob, name='dp2')
-            fc3 = tf.layers.dense(dp2, 2, activation=None, name='fc3')
-            score = tf.nn.softmax(fc3)
-            score = tf.reshape(score[:, :, 0], [-1, self.max_time_len])
+            fc3 = tf.layers.dense(dp2, 1, activation=None, name='fc3')
+            score = tf.reshape(fc3, [-1, self.max_time_len])
+            # score = tf.nn.softmax(fc3)
+            # score = tf.reshape(score[:, :, 0], [-1, self.max_time_len])
             # output
-            seq_mask = tf.sequence_mask(self.seq_length_ph, maxlen=self.max_time_len, dtype=tf.float32)
-            y_pred = seq_mask * score
+            # seq_mask = tf.sequence_mask(self.seq_length_ph, maxlen=self.max_time_len, dtype=tf.float32)
+            # y_pred = seq_mask * score
+            seq_mask = (1 - tf.sequence_mask(self.seq_length_ph, maxlen=self.max_time_len, dtype=tf.float32)) * (
+                tf.float32.min)
+            score += seq_mask
+            y_pred = tf.nn.softmax(score)
         return y_pred
 
     def build_mlp_net(self, inp, layer=(500, 200, 80), scope='mlp'):
@@ -117,6 +122,28 @@ class BaseModel(object):
         self.loss = - tf.reduce_sum(
             self.label_ph / (tf.reduce_sum(self.label_ph, axis=-1, keepdims=True) + 1e-8) * tf.log(y_pred))
         self.opt()
+
+    def feature_augmentation(self):
+        with tf.variable_scope(name_or_scope="Feature_Augmentation"):
+            self.all_feature_concatenation = self.itm_enc_input
+            # position feature.
+            self.batch_size = tf.shape(self.all_feature_concatenation)[0]
+            position_feature = self.get_position_feature(self.max_time_len)  # [B,N,1]
+            self.all_feature_concatenation = tf.concat([tf.tile(self.usr_enc_input, [1, self.max_time_len, 1])
+                                                           , self.all_feature_concatenation, position_feature], axis=-1)
+            mask = tf.reshape(tf.sequence_mask(self.seq_length_ph, maxlen=self.max_time_len, dtype=tf.float32)
+                              , [self.batch_size, self.max_time_len, 1])
+            self.all_feature_concatenation *= tf.tile(mask,
+                                                      [1, 1, self.all_feature_concatenation.get_shape()[-1].value])
+
+    def get_position_feature(self, length):
+        position_feature = tf.range(1, length + 1, 1.0) / tf.cast(self.max_time_len, tf.float32)
+        position_feature = tf.reshape(position_feature, [-1, length, 1])
+        position_feature = tf.tile(position_feature, [self.batch_size, 1, 1])  # (B, N, 1)
+        mask = tf.reshape(tf.sequence_mask(self.seq_length_ph, maxlen=self.max_time_len, dtype=tf.float32)
+                          , [self.batch_size, self.max_time_len, 1])
+        position_feature *= mask
+        return position_feature
 
     def build_mseloss(self, y_pred):
         self.loss = tf.losses.mean_squared_error(self.label_ph, y_pred)
@@ -269,6 +296,8 @@ class GSF(BaseModel):
 
         with self.graph.as_default():
             self.group_size = group_size
+            self.feature_augmentation()
+            self.item_seq = self.all_feature_concatenation
             input_list = tf.unstack(self.item_seq, axis=1)
             input_data = tf.concat(input_list, axis=0)
             output_data = input_data
@@ -349,34 +378,56 @@ class PRM(BaseModel):
         with self.graph.as_default():
             pos_dim = self.item_seq.get_shape().as_list()[-1]
             self.d_model = d_model
-            self.pos_mtx = tf.get_variable("pos_mtx", [max_time_len, pos_dim],
-                                           initializer=tf.truncated_normal_initializer)
-            self.item_seq = self.item_seq + self.pos_mtx
-            if pos_dim % 2:
-                self.item_seq = tf.pad(self.item_seq, [[0, 0], [0, 0], [0, 1]])
-
-            self.item_seq = self.multihead_attention(self.item_seq, self.item_seq, num_units=d_model,
-                                                     num_heads=n_head)
-            self.item_seq = self.positionwise_feed_forward(self.item_seq, self.d_model, d_inner_hid, self.keep_prob)
-            # self.item_seq = tf.layers.dense(self.item_seq, self.d_model, activation=tf.nn.tanh, name='fc')
-
-            mask = tf.expand_dims(tf.sequence_mask(self.seq_length_ph, maxlen=max_time_len, dtype=tf.float32),
-                                  axis=-1)
-            seq_rep = self.item_seq * mask
-
-            self.y_pred = self.build_prm_fc_function(seq_rep)
-            # self.y_pred = self.build_fc_net(seq_rep)
+            self.feature_augmentation()
+            self.item_seq = self.all_feature_concatenation
+            # self.item_seq = self.multihead_attention(self.item_seq, self.item_seq, num_units=d_model,
+            #                                          num_heads=n_head)
+            # self.item_seq = self.positionwise_feed_forward(self.item_seq, self.d_model, d_inner_hid, self.keep_prob)
+            #
+            # mask = tf.expand_dims(tf.sequence_mask(self.seq_length_ph, maxlen=max_time_len, dtype=tf.float32),
+            #                       axis=-1)
+            # seq_rep = self.item_seq * mask
+            self.y_pred = self.build_evaluator2()
+            # self.y_pred = self.build_prm_fc_function(seq_rep)
             self.build_logloss(self.y_pred)
+
+    def build_evaluator2(self):
+        self.all_feature_concatenation_evaluator = self.all_feature_concatenation
+        shape_list = self.all_feature_concatenation_evaluator.get_shape().as_list()
+        all_feature_concatenation_evaluator = tf.reshape(self.all_feature_concatenation_evaluator,
+                                                         [-1, self.max_time_len, shape_list[2]])
+        attn_inp = tf.layers.dense(all_feature_concatenation_evaluator, 128, activation=tf.nn.tanh, name='fc')
+        queries = attn_inp
+        keys = attn_inp
+        # mask = tf.cast(tf.ones_like(keys[:, :, 0]), dtype=tf.bool)
+        mask = tf.sequence_mask(self.seq_length_ph, maxlen=self.max_time_len, dtype=tf.bool)
+        attn_op = self.multihead_attention(queries, keys, num_units=128, num_heads=8)
+        bn1 = tf.layers.batch_normalization(inputs=attn_op, name='bn1', training=self.is_train)
+        fc1 = tf.layers.dense(bn1, 128, activation=tf.nn.relu, name='fc1')
+        dp1 = tf.nn.dropout(fc1, self.keep_prob, name='dp1')
+        fc2 = tf.layers.dense(dp1, 1, activation=None, name='fc2')
+        logits = tf.reshape(fc2, [-1, self.max_time_len])
+        seq_mask = (1 - tf.sequence_mask(self.seq_length_ph, maxlen=self.max_time_len, dtype=tf.float32)) * (
+            tf.float32.min)
+        logits += seq_mask
+        logits = tf.nn.softmax(logits)
+        return logits
 
     def build_prm_fc_function(self, inp):
         bn1 = tf.layers.batch_normalization(inputs=inp, name='bn1', training=self.is_train)
         fc1 = tf.layers.dense(bn1, self.d_model, activation=tf.nn.relu, name='fc1')
         dp1 = tf.nn.dropout(fc1, self.keep_prob, name='dp1')
         fc2 = tf.layers.dense(dp1, 1, activation=None, name='fc2')
-        score = tf.nn.softmax(tf.reshape(fc2, [-1, self.max_time_len]))
+        score = tf.reshape(fc2, [-1, self.max_time_len])
+        # score = tf.nn.softmax(tf.reshape(fc2, [-1, self.max_time_len]))
         # output
-        seq_mask = tf.sequence_mask(self.seq_length_ph, maxlen=self.max_time_len, dtype=tf.float32)
-        return seq_mask * score
+        # seq_mask = tf.sequence_mask(self.seq_length_ph, maxlen=self.max_time_len, dtype=tf.float32)
+        seq_mask = (1 - tf.sequence_mask(self.seq_length_ph, maxlen=self.max_time_len, dtype=tf.float32)) * (
+            tf.float32.min)
+        score += seq_mask
+        y_pred = tf.nn.softmax(score)
+        return y_pred
+        # return seq_mask * score
 
 class SetRank(BaseModel):
     def __init__(self, feature_size, eb_dim, hidden_size, max_time_len, itm_spar_num, itm_dens_num,
@@ -385,6 +436,8 @@ class SetRank(BaseModel):
                                       itm_spar_num, itm_dens_num, profile_num, max_norm)
 
         with self.graph.as_default():
+            self.feature_augmentation()
+            self.item_seq = self.all_feature_concatenation
             self.item_seq = self.multihead_attention(self.item_seq, self.item_seq, num_units=d_model,
                                                      num_heads=n_head)
             self.item_seq = self.positionwise_feed_forward(self.item_seq, d_model, d_inner_hid,
@@ -405,6 +458,8 @@ class DLCM(BaseModel):
 
         with self.graph.as_default():
             with tf.name_scope('gru'):
+                self.feature_augmentation()
+                self.item_seq = self.all_feature_concatenation
                 seq_ht, seq_final_state = tf.nn.dynamic_rnn(GRUCell(hidden_size), inputs=self.item_seq,
                                                             sequence_length=self.seq_length_ph, dtype=tf.float32,
                                                             scope='gru1')
