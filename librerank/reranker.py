@@ -84,7 +84,7 @@ class BaseModel(object):
     def build_fc_net(self, inp, scope='fc'):
         with tf.variable_scope(scope):
             bn1 = tf.layers.batch_normalization(inputs=inp, name='bn1', training=self.is_train)
-            fc1 = tf.layers.dense(bn1, 200, activation=tf.nn.relu, name='fc1')
+            fc1 = tf.layers.dense(bn1, 128, activation=tf.nn.relu, name='fc1')
             dp1 = tf.nn.dropout(fc1, self.keep_prob, name='dp1')
             fc2 = tf.layers.dense(dp1, 80, activation=tf.nn.relu, name='fc2')
             dp2 = tf.nn.dropout(fc2, self.keep_prob, name='dp2')
@@ -371,7 +371,7 @@ class miDNN(BaseModel):
 
 class PRM(BaseModel):
     def __init__(self, feature_size, eb_dim, hidden_size, max_time_len, itm_spar_num, itm_dens_num,
-                 profile_num, max_norm=None, d_model=64, d_inner_hid=128, n_head=1):
+                 profile_num, max_norm=None, d_model=128, d_inner_hid=128, n_head=1):
         super(PRM, self).__init__(feature_size, eb_dim, hidden_size, max_time_len,
                                   itm_spar_num, itm_dens_num, profile_num, max_norm)
 
@@ -431,7 +431,7 @@ class PRM(BaseModel):
 
 class SetRank(BaseModel):
     def __init__(self, feature_size, eb_dim, hidden_size, max_time_len, itm_spar_num, itm_dens_num,
-                 profile_num, max_norm=None, d_model=256, n_head=8, d_inner_hid=64):
+                 profile_num, max_norm=None, d_model=128, n_head=8, d_inner_hid=64):
         super(SetRank, self).__init__(feature_size, eb_dim, hidden_size, max_time_len,
                                       itm_spar_num, itm_dens_num, profile_num, max_norm)
 
