@@ -12,7 +12,7 @@ from librerank.CMR_generator import *
 from librerank.CMR_evaluator import *
 from librerank.LAST_generator import *
 from librerank.LAST_evaluator import *
-from librerank.Neural_sort import *
+from librerank.EPO import *
 import datetime
 
 
@@ -225,13 +225,13 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
             evaluator.set_sess(sess)
             sess.run(tf.global_variables_initializer())
             evaluator.load(params.evaluator_path)
-    elif params.model_type == 'EGR_PRM_generator':
+    elif params.model_type == 'EGR_EPO_generator':
         model = PPOModel(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum, itm_dens_fnum,
                          profile_num, max_norm=params.max_norm, rep_num=params.rep_num, acc_prefer=params.acc_prefer,
                          is_controllable=params.controllable)
         # discriminator = EGR_discriminator(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum, itm_dens_fnum,
         #              profile_num, max_norm=params.max_norm)
-        evaluator = NS_generator(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
+        evaluator = EPO(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
                              itm_dens_fnum, profile_num, max_norm=params.max_norm, rep_num=params.rep_num,
                              acc_prefer=params.acc_prefer, is_controllable=params.controllable, model_name=params.model_type)
         with evaluator.graph.as_default() as g:
@@ -254,7 +254,7 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
         model = SLModel(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum, itm_dens_fnum,
                         profile_num, max_norm=params.max_norm, acc_prefer=params.acc_prefer,
                         is_controllable=params.controllable)
-    elif params.model_type == 'CMR_generator' or  params.model_type == 'CMR_PRM_generator':
+    elif params.model_type == 'CMR_generator' or  params.model_type == 'CMR_EPO_generator':
         model = CMR_generator(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
                               itm_dens_fnum,
                               profile_num, max_norm=params.max_norm, rep_num=params.rep_num,
@@ -274,7 +274,7 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
                                        itm_dens_fnum,
                                        profile_num, max_norm=params.max_norm)
         elif params.evaluator_type == 'cmr_prm':
-            evaluator = NS_generator(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
+            evaluator = EPO(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
                              itm_dens_fnum, profile_num, max_norm=params.max_norm, rep_num=params.rep_num,
                              acc_prefer=params.acc_prefer, is_controllable=params.controllable, model_name=params.model_type)
             
@@ -284,9 +284,9 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
             sess.run(tf.global_variables_initializer())
             evaluator.load(params.evaluator_path)
             print(f"evaluator loaded from: {params.evaluator_path}")
-    elif params.model_type == 'NS_generator' or params.model_type == 'NS_evaluator':
+    elif params.model_type == 'EPO_generator' or params.model_type == 'EPO_evaluator':
         params.acc_prefer = 1.0
-        model = NS_generator(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
+        model = EPO(feature_size, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
                              itm_dens_fnum, profile_num, max_norm=params.max_norm, rep_num=params.rep_num,
                              acc_prefer=params.acc_prefer, is_controllable=params.controllable, model_name=params.model_type)
 
@@ -313,24 +313,10 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
         sess.run(tf.global_variables_initializer())
         sess.run(tf.local_variables_initializer())
         model.set_sess(sess)
-    if params.model_type == 'NS_generator':
+    if params.model_type == 'EPO_generator':
         # model.load(params.evaluator_path)
         model.load_evaluator_params(params.evaluator_path)
         print("NS evaluator loaded")
-
-    #     # 假设你已经定义了evaluator部分的变量
-    #     evaluator_variables = [var for var in tf.trainable_variables() if "NS_evaluator" in var.name]
-
-    #     # 创建一个Saver，只保存evaluator部分的变量
-    #     saver = tf.train.Saver(var_list=evaluator_variables)
-
-    #     model_path = '/root/LAST/model/save_model_ad/10/202303091111_lambdaMART_LAST_evaluator_16_0.0005_0.0002_64_16_0.8_1.0'
-    #     # 恢复evaluator部分的参数
-    #     load_evaluator_params(model, saver, sess, model_path, evaluator_variables)
-
-    #     if params.reload_model == True:
-    #         model.load(params.reload_path)
-    #         print("reload ", params.reload_path)
 
     training_monitor = {
         'train_loss': [],
@@ -393,13 +379,13 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
 
     if True:
         if not params.controllable:
-            if params.model_type == 'NS_generator':
+            if params.model_type == 'EPO_generator':
                 vali_loss, res = eval_ns(model, test_file, params.l2_reg, params.batch_size, False,
                                          params.metric_scope, True)
-            elif params.model_type == 'NS_evaluator':
+            elif params.model_type == 'EPO_evaluator':
                 vali_loss, res = eval_ns(model, test_file, params.l2_reg, params.batch_size, False,
                                          params.metric_scope, False)
-            elif params.model_type == 'CMR_PRM_generator' or params.model_type == 'EGR_PRM_generator':
+            elif params.model_type == 'CMR_EPO_generator' or params.model_type == 'EGR_EPO_generator':
                 vali_loss, res = eval(model, test_file, params.l2_reg, params.batch_size, False,
                                       params.metric_scope, True, with_evaluator=params.with_evaluator_metrics, evaluator=
                                       evaluator if params.with_evaluator_metrics else None)
@@ -509,7 +495,7 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
                                                                     params.keep_prob, train_prefer=train_prefer)
                 auc_train_losses_step.append(auc_loss)
                 div_train_losses_step.append(div_loss)
-            elif  params.model_type == 'EGR_PRM_generator':
+            elif  params.model_type == 'EGR_EPO_generator':
                 data_batch = repeat_data(data_batch, params.rep_num)
 
                 act_idx_out, act_probs_one, rl_sp_outputs, rl_de_outputs, mask_arr, lp_sp_data, lp_de_data, _, enc_input, \
@@ -557,8 +543,7 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
                 loss = model.train(data_batch, training_prediction_order, auc_rewards, div_rewards, params.lr,
                                    params.l2_reg,
                                    params.keep_prob)
-            elif params.model_type == 'CMR_generator' or params.model_type == 'CMR_PRM_generator'  :
-                # 这里生成的cate_chosen也是传递序列的关键数据
+            elif params.model_type == 'CMR_generator' or params.model_type == 'CMR_EPO_generator'  :
                 training_attention_distribution, training_prediction_order, predictions, cate_seq, cate_chosen = \
                     model.rerank(data_batch, params.keep_prob, train_prefer=train_prefer)
 
@@ -634,12 +619,12 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
                                                        train_prefer=train_prefer)
                 auc_train_losses_step.append(auc_loss)
                 div_train_losses_step.append(div_loss)
-            elif params.model_type == 'NS_evaluator':
+            elif params.model_type == 'EPO_evaluator':
                 train_prefer = 1
                 loss = model.train_evaluator(data_batch, params.lr, params.l2_reg, params.keep_prob,
                                              train_prefer=train_prefer)
                 auc_train_losses_step.append(loss)
-            elif params.model_type == 'NS_generator':
+            elif params.model_type == 'EPO_generator':
                 train_prefer = 1
                 loss = model.train(data_batch, params.lr, params.l2_reg, params.keep_prob, train_prefer)
                 auc_train_losses_step.append(loss)
@@ -674,13 +659,13 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
                 div_train_losses_step = []
 
                 if not params.controllable:
-                    if params.model_type == 'NS_generator':
+                    if params.model_type == 'EPO_generator':
                         vali_loss, res = eval_ns(model, test_file, params.l2_reg, params.batch_size, True,
                                                  params.metric_scope, True)
-                    elif params.model_type == 'NS_evaluator':
+                    elif params.model_type == 'EPO_evaluator':
                         vali_loss, res = eval_ns(model, test_file, params.l2_reg, params.batch_size, True,
                                                  params.metric_scope, False)
-                    elif params.model_type == 'CMR_PRM_generator' or params.model_type == 'EGR_PRM_generator' :
+                    elif params.model_type == 'CMR_EPO_generator' or params.model_type == 'EGR_EPO_generator' :
                         vali_loss, res = eval(model, test_file, params.l2_reg, params.batch_size, True,
                                               params.metric_scope, True, with_evaluator=params.with_evaluator_metrics,
                                               evaluator=evaluator if params.with_evaluator_metrics else None)
@@ -801,12 +786,12 @@ def reranker_parse_args():
     parser.add_argument('--max_time_len', default=10, type=int, help='max time length')
     parser.add_argument('--save_dir', type=str, default='./', help='dir that saves logs and model')
     parser.add_argument('--data_dir', type=str, default='./data/ad/', help='data dir')
-    parser.add_argument('--model_type', default='EGR_PRM_generator',
+    parser.add_argument('--model_type', default='EPO_generator',
                         choices=['PRM', 'DLCM', 'SetRank', 'GSF', 'miDNN', 'Seq2Slate', 'EGR_evaluator',
                                  'EGR_generator', 'CMR_generator', 'CMR_evaluator', 'LAST_generator',
-                                 'LAST_evaluator', 'NS_generator', 'NS_evaluator', 'CMR_PRM_generator', 'EGR_RPM_generator'],
+                                 'LAST_evaluator', 'CMR_EPO_generator', 'EGR_EPO_generator', 'EPO_generator', 'EPO_evaluator'],
                         type=str,
-                        help='algorithm name, including PRM, DLCM, SetRank, GSF, miDNN, Seq2Slate, EGR_evaluator, EGR_generator')
+                        help='algorithm name. In order to ensure consistency of evaluators and fairness in the comparison, CMR_EPO_generator and EGR_EPO_generator use EPO_evaluator as the method for the evaluator.')
     parser.add_argument('--data_set_name', default='ad', type=str, help='name of dataset, including ad and prm')
     parser.add_argument('--initial_ranker', default='lambdaMART', choices=['DNN', 'lambdaMART'], type=str,
                         help='name of dataset, including DNN, lambdaMART')
@@ -829,7 +814,7 @@ def reranker_parse_args():
     parser.add_argument('--evaluator_path', type=str, default='', help='evaluator ckpt dir')
     parser.add_argument('--reload_path', type=str, default='', help='model ckpt dir')
     # parser.add_argument('--setting_path', type=str, default='./config/prm_setting.json', help='setting dir')
-    parser.add_argument('--setting_path', type=str, default='./example/config/ad/egr_prm_generator_setting.json',
+    parser.add_argument('--setting_path', type=str, default='./example/config/ad/epo_generator_setting.json',
                         help='setting dir')
     parser.add_argument('--controllable', type=bool, default=False, help='is controllable')
     parser.add_argument('--auc_rewards_type', type=str, default='iv', help='auc rewards type')
@@ -837,8 +822,6 @@ def reranker_parse_args():
     parser.add_argument('--evaluator_type', type=str, default='cmr', help='evaluator_type')
     parser.add_argument('--with_evaluator_metrics', type=bool, default=False, help='with_evaluator_metrics')
     parser.add_argument('--reload_model', type=bool, default=False, help='reload model')
-    parser.add_argument('--bata', default=1.0, type=float, help='gumbel noise sampling')
-    parser.add_argument('--temperature', default=1.0, type=float, help='neural sort')
     FLAGS, _ = parser.parse_known_args()
     return FLAGS
 

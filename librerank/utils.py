@@ -51,7 +51,6 @@ def neural_sort(values, rank_score, temperature_factor):
     p_sort = p_sort / temperature_factor    # [B,20,20]
     p_sort = tf.nn.softmax(p_sort)  # [B,20,20]
 
-    # 确保将 values 转换为 float32 类型
     sorted_values = tf.matmul(tf.cast(p_sort, tf.float32), tf.cast(values, tf.float32))
   # [B,20,20] * [B,20,D] = [B,20,D]
     # sorted_values = tf.Print(sorted_values, [p_sort[0], values[0], sorted_values[0]], message="check detail", first_n=10000, summarize=10000000)

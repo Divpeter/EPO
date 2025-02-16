@@ -17,6 +17,6 @@
   "with_evaluator_metrics": true,
   "auc_rewards_type": "iv",
   "div_rewards_type": "iv",
-  "acc_prefer": 0.2,
+  "acc_prefer": 1,
   "evaluator_type": "cmr"
 }

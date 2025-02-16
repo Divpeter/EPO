@@ -10,7 +10,7 @@ from librerank.CMR_generator import *
 from librerank.rl_reranker import *
 from librerank.LAST_generator import *
 from librerank.LAST_evaluator import *
-from librerank.Neural_sort import *
+from librerank.EPO import *
 import datetime
 from run_reranker import eval
 import matplotlib.pyplot as plt
@@ -54,19 +54,21 @@ def eval_last(model, data, batch_size, isrank, metric_scope, _print=False, evalu
 
         pred, order = model.instant_learning(data_batch, auc_rewards, div_rewards, inference_order)  # pred: [L, B, N]
         batch_ave_steps = []  # [L, scope_num, B]
+        ave_collect = []
         for i in range(step_sizes):
             batch_sum, batch_ave = evaluator_metrics_ns(data_batch, order[i], metric_scope, evaluator)  # [scope_num, B]
             res = list(evaluate_multi(data_batch[4], pred[i], list(map(lambda a: [i[1] for i in a], data_batch[2])), metric_scope, isrank, _print))  # [3+2, scope_num, ]
             div_metrics = res[-1][-1]
             ndcg_metrics = res[1][-1]
-            batch_ave = np.array(batch_ave)*1+np.array(ndcg_metrics)*0
+            ave_collect.append(batch_ave)
+            batch_ave = np.array(batch_ave)*0+np.array(ndcg_metrics)*1
             batch_ave_steps.append(batch_ave)
             #batch_ave_steps.append(ndcg_metrics)
         batch_ave_steps_cmr = np.array(batch_ave_steps[:step_sizes // 2])
         batch_ave_steps_last = np.array(batch_ave_steps[step_sizes // 2:])
         best_cmr_idx = np.argmax(batch_ave_steps_cmr[:, -1, :], axis=0)
         best_last_idx = np.argmax(batch_ave_steps_last[:, -1, :], axis=0)
-        pred = np.array(pred)
+        pred = np.array(pred) 
         pred_cmr = pred[best_cmr_idx, np.arange(pred.shape[1]), :]
         pred_last = pred[step_sizes//2 + best_last_idx, np.arange(pred.shape[1]), :]
         preds_cmr.extend(pred_cmr)
@@ -74,19 +76,36 @@ def eval_last(model, data, batch_size, isrank, metric_scope, _print=False, evalu
         batch_cmr_metrics = batch_ave_steps_cmr[best_cmr_idx, :, np.arange(pred.shape[1])]
         batch_last_metrics = batch_ave_steps_last[best_last_idx, :, np.arange(pred.shape[1])]
         # for i in range(len(metric_scope)):
-        eva_cmr_ave.extend(batch_cmr_metrics)
-        eva_last_ave.extend(batch_last_metrics)
+        # eva_cmr_ave.extend(batch_cmr_metrics)
+        # eva_last_ave.extend(batch_last_metrics)
+
+        batch_ave_steps_cmr_2 = np.array(ave_collect[:step_sizes // 2])
+        batch_ave_steps_last_2 = np.array(ave_collect[step_sizes // 2:])
+        best_cmr_idx_2 = np.argmax(batch_ave_steps_cmr_2[:, -1, :], axis=0)
+        best_last_idx_2 = np.argmax(batch_ave_steps_last_2[:, -1, :], axis=0)
+        pred_2 = np.array(pred) 
+        # pred_cmr_2 = pred_2[best_cmr_idx_2, np.arange(pred_2.shape[1]), :]
+        # pred_last_2 = pred_2[step_sizes//2 + best_last_idx_2, np.arange(pred_2.shape[1]), :]
+        # preds_cmr.extend(pred_cmr)
+        # preds_last.extend(pred_last)
+        batch_cmr_metrics_2 = batch_ave_steps_cmr_2[best_cmr_idx_2, :, np.arange(pred_2.shape[1])]
+        batch_last_metrics_2 = batch_ave_steps_last_2[best_last_idx_2, :, np.arange(pred_2.shape[1])]
+        # for i in range(len(metric_scope)):
+        eva_cmr_ave.extend(batch_cmr_metrics_2)
+        eva_last_ave.extend(batch_last_metrics_2)
 
     labels = data[4]
     cate_ids = list(map(lambda a: [i[1] for i in a], data[2]))
 
-    print("multi-CMR")
+    #base model result 
+    print("base model")
     res = list(evaluate_multi(labels, preds_cmr, cate_ids, metric_scope, isrank, _print))  # [3+2, scope_num, ]
     for j, s in enumerate(params.metric_scope):
         print("@%d  MAP: %.4f  NDCG: %.4f  CLICKS: %.4f  ERR_IA: %.4f  ALPHA_NDCG: %.4f  EVA_AVE: %.4f" % (
             s, res[0][j], res[1][j], res[2][j], res[4][j], res[5][j], np.mean(np.array(eva_cmr_ave), axis=0)[j]))
     # s, res[0][j], res[1][j], res[2][j], res[4][j], 10 * (np.mean(np.array(eva_cmr_ave), axis=0)[j] - 0.9 * res[4][j])))
 
+    #model results under the LAST framework
     print("LAST")
     res = list(evaluate_multi(labels, preds_last, cate_ids, metric_scope, isrank, _print))  # [3+2, scope_num, ]
     for j, s in enumerate(params.metric_scope):
@@ -103,8 +122,8 @@ def reranker_parse_args():
     parser.add_argument('--save_dir', type=str, default='./', help='dir that saves logs and model')
     parser.add_argument('--data_dir', type=str, default='./data/ad/', help='data dir')
     parser.add_argument('--model_type', default='LAST_generator',
-                        choices=['PRM', 'DLCM', 'SetRank', 'GSF', 'miDNN', 'Seq2Slate', 'EGR_evaluator',
-                                 'EGR_generator', 'CMR_generator', 'LAST_generator'],
+                        choices=['PRM', 'DLCM', 'SetRank', 'GSF', 'miDNN', 'Seq2Slate', 
+                                 'EGR_generator', 'CMR_generator','EGR_EPO_generator', 'CMR_EPO_generator', 'LAST_generator','EPO_generator'],
                         type=str,
                         help='algorithm name, including PRM, DLCM, SetRank, GSF, miDNN, Seq2Slate, EGR_evaluator, EGR_generator')
     parser.add_argument('--data_set_name', default='ad', type=str, help='name of dataset, including ad and prm')
@@ -128,7 +147,7 @@ def reranker_parse_args():
     parser.add_argument('--timestamp', type=str, default=datetime.datetime.now().strftime("%Y%m%d%H%M"))
     parser.add_argument('--evaluator_path', type=str, default='', help='evaluator ckpt dir')
     parser.add_argument('--reload_path', type=str,
-                        default='./model//save_model_ad/10/202502061048_lambdaMART_CMR_PRM_generator_512_0.0001_0.0001_64_16_0.8_1',
+                        default='/root/Neural_sort4reranking/model/save_model_ad/10/202502101226_lambdaMART_CMR_PRM_generator_512_0.001_0.0001_64_16_0.8_1',
                         help='model ckpt dir')
     parser.add_argument('--setting_path', type=str, default='./example/config/ad/last_generator_setting.json',
                         help='setting dir')
@@ -195,7 +214,7 @@ if __name__ == '__main__':
         model = SLModel(num_ft, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum, itm_dens_fnum,
                         profile_fnum, max_norm=params.max_norm, acc_prefer=params.acc_prefer,
                         is_controllable=params.controllable)
-    elif params.model_type == 'EGR_generator':
+    elif params.model_type == 'EGR_generator' or params.model_type == 'EGR_EPO_generator':
         model = PPOModel(num_ft, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum, itm_dens_fnum,
                          profile_fnum, max_norm=params.max_norm, rep_num=params.rep_num, acc_prefer=params.acc_prefer,
                          is_controllable=params.controllable)
@@ -207,10 +226,15 @@ if __name__ == '__main__':
         model = miDNN(num_ft, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum, itm_dens_fnum,
                       profile_fnum, max_norm=params.max_norm, is_controllable=params.controllable,
                       acc_prefer=params.acc_prefer)
-    elif params.model_type == 'LAST_generator':
+    elif params.model_type == 'LAST_generator' or params.model_type == 'CMR_EPO_generator':
         model = LAST_generator(num_ft, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
                                itm_dens_fnum, profile_fnum, max_norm=params.max_norm, rep_num=params.rep_num,
                                acc_prefer=1, is_controllable=False)
+    elif params.model_type == 'EPO_generator':
+        model = EPO(num_ft, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
+                         itm_dens_fnum, profile_fnum, max_norm=params.max_norm, rep_num=params.rep_num,
+                         acc_prefer=params.acc_prefer, is_controllable=params.controllable,
+                         model_name=params.model_type)
 
     with model.graph.as_default() as g:
         sess = tf.Session(graph=g, config=tf.ConfigProto(gpu_options=gpu_options))
@@ -218,7 +242,7 @@ if __name__ == '__main__':
         sess.run(tf.global_variables_initializer())
         model.load(params.reload_path)
 
-    evaluator = NS_generator(num_ft, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
+    evaluator = EPO(num_ft, params.eb_dim, params.hidden_size, max_time_len, itm_spar_fnum,
                          itm_dens_fnum, profile_fnum, max_norm=params.max_norm, rep_num=params.rep_num,
                          acc_prefer=params.acc_prefer, is_controllable=params.controllable,
                          model_name=params.model_type)
@@ -235,5 +259,5 @@ if __name__ == '__main__':
     #for i, s in enumerate(params.metric_scope):
     #    print("@%d  MAP: %.4f  NDCG: %.4f  CLICKS: %.4f  ERR_IA: %.4f  ALPHA_NDCG: %.4f  EVA_AVE: %.4f" % (
     #        s, res[0][i], res[1][i], res[2][i], res[4][i], res[5][i], res[-1][i]))
-    if params.model_type == 'LAST_generator':
+    if params.model_type == 'LAST_generator' or params.model_type == 'EPO_generator' or params.model_type == 'EGR_EPO_generator' :
         eval_last(model, test_lists, params.batch_size, True, params.metric_scope, evaluator=evaluator)
