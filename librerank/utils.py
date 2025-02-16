@@ -51,6 +51,7 @@ def neural_sort(values, rank_score, temperature_factor):
     p_sort = p_sort / temperature_factor    # [B,20,20]
     p_sort = tf.nn.softmax(p_sort)  # [B,20,20]
 
+    # 确保将 values 转换为 float32 类型
     sorted_values = tf.matmul(tf.cast(p_sort, tf.float32), tf.cast(values, tf.float32))
   # [B,20,20] * [B,20,D] = [B,20,D]
     # sorted_values = tf.Print(sorted_values, [p_sort[0], values[0], sorted_values[0]], message="check detail", first_n=10000, summarize=10000000)
@@ -517,8 +518,11 @@ def evaluator_metrics_ns(data_batch, order, scope_number, model):
     for i, scope in enumerate(scope_number):
         sum_reward = np.sum(auc_rewards[:, :scope], axis=1)
         ave_reward = [sum_reward[i] / min(scope, data_batch[6][i]) for i in range(len(sum_reward))]
+        # discount_factors = tf.math.log(2.0) / tf.math.log(tf.cast(tf.range(1,scope + 1), tf.float32) + 1.0)
+        discount_factors = np.log(2.0) / np.log(np.arange(1, scope + 1) + 1.0)
+        dcg_reward = np.sum(auc_rewards[:, :scope] * discount_factors, axis = 1)
         auc_rewards_sum[i].extend(sum_reward)
-        auc_rewards_ave[i].extend(ave_reward)
+        auc_rewards_ave[i].extend(dcg_reward)
     return auc_rewards_sum, auc_rewards_ave
 
 def choose_best_step(metrics):  # [step_sizes, scope_num, B]
