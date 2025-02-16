@@ -61,6 +61,7 @@ def eval_last(model, data, batch_size, isrank, metric_scope, _print=False, evalu
             div_metrics = res[-1][-1]
             ndcg_metrics = res[1][-1]
             ave_collect.append(batch_ave)
+            #decide whether the model use evaluator score or ndcg as reward
             batch_ave = np.array(batch_ave)*0+np.array(ndcg_metrics)*1
             batch_ave_steps.append(batch_ave)
             #batch_ave_steps.append(ndcg_metrics)

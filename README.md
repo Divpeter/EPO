@@ -1,6 +1,6 @@
 # EPO
 
-EPO is an extended version of [LAST](https://github.com/lyingCS/LAST) 
+EPO is an extended version of [LAST](https://github.com/lyingCS/LAST) and [librerank](https://github.com/LibRerank-Community/LibRerank)
 
 ## Quick Started
 
@@ -14,7 +14,13 @@ make init
 
 ### Decompress evaluator checkpoint
 
-For facilitate the training of the generator, we provide a  version of the checkpoints of EPO_evaluator that have been pretrained. We first need to decompress it.
+For facilitate the training of the generator, we provide a  version of the checkpoints of EPO_evaluator that have been pretrained. Please ensure you have Git LFS installed and fetch the EPO_evaluator model files after cloning the repository. 
+
+```
+git lfs pull
+```
+
+Then you need to decompress it.
 
 ```
 tar -xzvf ./model/save_model_ad/10/*.tar.gz -C ./model/save_model_ad/10/

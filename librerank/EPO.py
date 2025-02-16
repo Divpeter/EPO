@@ -382,7 +382,7 @@ class EPO(RLModel):
             self.feed_context_vector = True
             self.feed_train_order = tf.placeholder(tf.bool)
             self.feed_inference_order = tf.placeholder(tf.bool)
-            self.generator_name = 'EPO_generator'
+            self.generator_name = 'NS_generator'
             self.train_order = tf.placeholder(tf.int64, [None, self.item_size])
             self.inference_order = tf.placeholder(tf.int64, [None, self.item_size])
 
@@ -394,7 +394,7 @@ class EPO(RLModel):
             self.multi_head_self_attention_layer = None
             self.rnn_layer = None
             self.pair_wise_comparison_layer = None
-            self.evaluator_name = 'EPO_evaluator'
+            self.evaluator_name = 'NS_evaluator'
             self.label_type = 'ndcg'
             self.feature_batch_norm = True
             self.N = self.item_size = self.pv_size = self.max_time_len
@@ -444,8 +444,9 @@ class EPO(RLModel):
         self.decoder_cell_record = self.decoder_cell
 
     def compute_dcg_pv_loss(self, logits):
-        discount_factors = tf.math.log(tf.cast(tf.range(1, self.N + 1), tf.float32) + 1.0) / tf.math.log(2.0)
-        dcg = tf.reduce_sum(logits * discount_factors, axis=1)
+        self.discount_factors = - 1.0 * tf.cast(tf.range(1, self.N + 1), tf.float32) ** 2
+        self.dis_logits = self.discount_factors * logits
+        dcg = tf.reduce_sum(logits * self.discount_factors, axis=1)
         return dcg
 
     def build_actor_loss(self):
@@ -520,7 +521,7 @@ class EPO(RLModel):
             return rerank_predict, 0
 
     def build_evaluator_loss(self):
-        with tf.name_scope("EPO_evaluator_Loss_Op"):
+        with tf.name_scope("NS_evaluator_Loss_Op"):
             if self.score_format == 'pv':
                 loss_weight = tf.ones([self.batch_size, 1])  # [B,1]
                 if self.label_type == "total_num":  # label_ph: [B, N(0 or 1)]

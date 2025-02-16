@@ -678,7 +678,7 @@ def train(train_file, test_file, feature_size, max_time_len, itm_spar_fnum, itm_
                     training_monitor['auc_train_loss'].append(auc_train_loss)
                     training_monitor['div_train_loss'].append(div_train_loss)
                     training_monitor['vali_loss'].append(vali_loss)
-                    training_monitor['map_l'].append(res[0][0])
+                    training_monitor['map_l'].append(res[0][-1])
                     training_monitor['ndcg_l'].append(res[1][0])
                     # training_monitor['de_ndcg_l'].append(res[2][0])
                     training_monitor['clicks_l'].append(res[2][0])
