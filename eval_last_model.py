@@ -344,6 +344,8 @@ if __name__ == '__main__':
     #for i, s in enumerate(params.metric_scope):
     #    print("@%d  MAP: %.4f  NDCG: %.4f  CLICKS: %.4f  ERR_IA: %.4f  ALPHA_NDCG: %.4f  EVA_AVE: %.4f" % (
     #        s, res[0][i], res[1][i], res[2][i], res[4][i], res[5][i], res[-1][i]))
+
+    #Please remember to change the "sample manner" to the mode you want in the model file, including sampling and greedy
     if params.model_type == 'LAST_generator' or params.model_type == 'CMR_EPO_generator' or params.model_type == 'EGR_PRM_generator' :
         eval_last(model, test_lists, params.batch_size, True, params.metric_scope, evaluator=evaluator)
     elif params.model_type == 'EPO_generator':
