@@ -41,12 +41,15 @@ python eval_last_model.py --reload_path='path/to/model/you/trained'
 ```
 
 ## More Experimental Analysis
-### Neural_sort Hyper_parameters Beta Analysis
+### Gumbel Noise Strength Beta Analysis
 In this experiment, we investigate the influence of  $\beta$, which is the scale parameter of the Gumbel noise. $\beta$ controls the mean and the variance at the same time. A large $\beta$ leads to a long tail probability distribution, which means it is more often to see large values of the noise. The noise is added to the clean rank score to provide randomness, which allows the policy to explore various list generation possibilities and ultimately find the best strategy. Cautious should be paid to interpret the hyperparameter. It is not a free parameter that controls the relative importance between the original rank score and the noise. In the original NeuralSort paper, Proposition 5 states that the perturbed rank score should be $\tilde s=\beta log(s) + g$, where $s$ is the clean rank score and $g$ is the noise sampled from $Gumbel(0, \beta)$. If we sample the noise $g_1$ from $Gumbel(0, 1)$, the equation can be rewritten into $\tilde s=\beta log(s) + \beta g_1$. Now it is clear that $\beta$ magnifies the original rank score and the strength in the same manner, not their relative importance. Nevertheless, it is interesting to see how the value of $\beta$ may influence the GLR model. We carry out two grid searches across $\beta$ values. The first is [0.01, 0.1, 1, 10, 100] and the second is [0.125, 0.25, 0.5, 1, 2, 4, 8]. The result is shown in the following figure. We can see that when $\beta$ is within [0.25, 8], the final Better Percentage (BP) can go above 80% and $\beta=1$ achieves the best result.
 
 <img src="beta_performance.png" alt="beta_performance" width="600" />
 
 ### Synthetic Data Experiment
+In this experiment, we examine how data distribution may cause performance degradation and how fast different methods can get used to the new data distribution. We keep the first part of the Ad dataset untouched and induce synthetic perturbation into the second half. To make the perturbation realistic, we train a model predicting user feedback, get predicted user click probabilities with perturbation added to the real-valued input features, and then obtain the new clicks label by Bernoulli sampling. The perturbation is multiplicative, and the perturbation strength is denoted by $\alpha$. $\alpha=1$ means no perturbation. We train a GLR model with the first half part of the Ad data. After that, we examine 1) how the GLR models perform on the second half perturbated data. 2) how fast the GLR models can recover from the perturbation. The following figures show the performance of the GLR models on the perturbated data with different perturbation strengths. 
 <img src="synthetic_data_experiment_result_1.png" alt="synthetic_data_experiment_result" width="600" />
 <img src="synthetic_data_experiment_result_2.png" alt="synthetic_data_experiment_result" width="600" />
 <img src="synthetic_data_experiment_result_3.png" alt="synthetic_data_experiment_result" width="600" />
+
+The recovering speed comparison is coming in no time...
