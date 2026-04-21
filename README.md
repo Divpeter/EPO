@@ -1,6 +1,6 @@
 # EPO
 
-EPO is an extended version of [LAST](https://github.com/lyingCS/LAST) and [librerank](https://github.com/LibRerank-Community/LibRerank)
+This is code for paper "Large-Scale Online Learning for Generative List Recommendation in E-commerce: An Environment Policy Optimization Approach"(SIGIR 2026).
 
 ## Quick Started
 
